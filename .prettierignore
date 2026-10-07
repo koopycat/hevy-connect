@@ -3,3 +3,5 @@ coverage/
 node_modules/
 .research/
 pnpm-lock.yaml
+# Verbatim upstream capture; reformatting would break its checksum.
+docs/hevy-openapi.json

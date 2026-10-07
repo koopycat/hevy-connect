@@ -6,9 +6,9 @@
 
 **Facts**
 
-- The API source is Hevy's official Swagger UI at [https://api.hevyapp.com/docs/](https://api.hevyapp.com/docs/). The local research capture is dated **2026-10-07** (from `.research/20261007-105219`; this is the capture date, not an asserted publication date).
-- `.research/20261007-105219/hevy-openapi.json` is an OpenAPI **3.0.0** document titled “Hevy Public API Docs,” with API version **0.0.1**. It contains 14 paths, 22 operations, and 28 named schemas.
-- `.research/20261007-105219/hevy-swagger-ui-init.js` embeds the same OpenAPI object byte-for-byte after JSON serialization. It adds only Swagger UI initialization; it does not reveal another API version, server URL, auth scheme, or rate limit.
+- The API source is Hevy's official Swagger UI at [https://api.hevyapp.com/docs/](https://api.hevyapp.com/docs/). The research capture is dated **2026-10-07** (from `.research/20261007-105219`; this is the capture date, not an asserted publication date).
+- [`hevy-openapi.json`](hevy-openapi.json) is the committed copy of that capture: an OpenAPI **3.0.0** document titled “Hevy Public API Docs,” with API version **0.0.1**. It contains 14 paths, 22 operations, and 28 named schemas. SHA-256: `eb82ec5a896d7d8589950c958d22584fda5289968c16e878279504b1e8dcbc37`. It is Hevy's document, kept for reference; the repository's MIT license does not cover it.
+- Swagger UI serves the contract embedded in `https://api.hevyapp.com/docs/swagger-ui-init.js`. The committed JSON is a verbatim excerpt of that script, which adds only Swagger UI initialization; it does not reveal another API version, server URL, auth scheme, or rate limit. On 2026-10-07 the live script was byte-identical to the capture.
 - The AXI source is the official [https://axi.md/](https://axi.md/) page captured as `.research/20261007-105219/pages/axi.md`.
 - The Hevy description explicitly says the public API is just beginning rollout, may change structure completely, and may be abandoned. It says access is currently limited to Hevy Pro users.
 - The contract has no `servers` entry and no changelog or stability policy. A `/v1` path prefix does not override the explicit `0.0.1` and instability warning.
