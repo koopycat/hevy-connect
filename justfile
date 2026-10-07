@@ -27,4 +27,4 @@ check:
 # Link the CLI into the active pnpm environment
 link:
     pnpm build
-    pnpm link --global
+    pnpm add --global "{{justfile_directory()}}"
