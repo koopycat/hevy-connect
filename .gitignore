@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+.research/
+.data/
+*.log
+.DS_Store
+__pycache__/
+*.py[cod]
