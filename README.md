@@ -84,7 +84,7 @@ Running `hevy-axi` with no arguments shows the home view: whether a key is confi
 - TOON is the default. Use `--json` or `--format json` for JSON.
 - Default views normalize inconsistent Hevy envelopes and select compact fields. `--fields id,title` projects comma-separated paths from that compact output.
 - `--full` returns the untruncated wire-oriented payload and cannot be combined with `--fields`.
-- `workout view` lists each exercise's sets (type, weight, reps, distance, duration, RPE, and custom metric) without `--full`.
+- `workout view` and `routine view` list each exercise's sets (type, weight, reps, distance, duration, and custom metric) without `--full`. Workout sets add RPE; routine sets add the planned rep range as `repRangeStart` and `repRangeEnd`.
 - Long strings are truncated explicitly in compact output; use `--full` to bypass truncation.
 - Lists accept `--page`, `--page-size`, `--limit`, and `--all`. `--all` starts at page 1 and cannot be combined with `--page`.
 - When `--limit` stops inside a page, `hasMore` is true and `resume: {page, skip}` names that page and how many of its leading items were already returned; the continuation command re-reads that page. `totalCount` appears only when it is exact.

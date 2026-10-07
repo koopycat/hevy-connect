@@ -243,7 +243,7 @@ function arrayLength(value: JsonValue | undefined): number {
   return Array.isArray(value) ? value.length : 0;
 }
 
-function compactSet(value: JsonValue): JsonObject {
+function compactWorkoutSet(value: JsonValue): JsonObject {
   const set = objectValue(value, "workout set");
   return {
     type: scalar(set.type),
@@ -293,11 +293,30 @@ function compactWorkout(value: JsonValue, detail = false): JsonObject {
         title: scalar(item.title),
         exerciseTemplateId: scalar(item.exercise_template_id),
         setCount: arrayLength(item.sets),
-        sets: Array.isArray(item.sets) ? item.sets.map(compactSet) : [],
+        sets: Array.isArray(item.sets) ? item.sets.map(compactWorkoutSet) : [],
       };
     });
   }
   return compact;
+}
+
+/** Flattens the planned rep range so routine sets stay one TOON table row. */
+function compactRoutineSet(value: JsonValue): JsonObject {
+  const set = objectValue(value, "routine set");
+  const repRange =
+    set.rep_range === undefined || set.rep_range === null
+      ? undefined
+      : objectValue(set.rep_range, "routine set rep range");
+  return {
+    type: scalar(set.type),
+    weightKg: scalar(set.weight_kg),
+    reps: scalar(set.reps),
+    repRangeStart: scalar(repRange?.start),
+    repRangeEnd: scalar(repRange?.end),
+    distanceMeters: scalar(set.distance_meters),
+    durationSeconds: scalar(set.duration_seconds),
+    customMetric: scalar(set.custom_metric),
+  };
 }
 
 function compactRoutine(value: JsonValue, detail = false): JsonObject {
@@ -316,6 +335,9 @@ function compactRoutine(value: JsonValue, detail = false): JsonObject {
             title: scalar(exercise.title),
             exerciseTemplateId: scalar(exercise.exercise_template_id),
             setCount: arrayLength(exercise.sets),
+            sets: Array.isArray(exercise.sets)
+              ? exercise.sets.map(compactRoutineSet)
+              : [],
           };
         })
       : [];

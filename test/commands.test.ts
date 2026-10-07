@@ -849,6 +849,83 @@ describe("all 22 Hevy operation routes and compact schemas", () => {
     expect(viewed).toMatchObject({ result: { id: "r-1", exerciseCount: 1 } });
   });
 
+  it("lists each exercise's planned sets in the compact routine view", async () => {
+    const h = harness({
+      responder: () => ({
+        routine: {
+          ...ROUTINE,
+          exercises: [
+            {
+              title: "Squat",
+              exercise_template_id: "e-1",
+              sets: [
+                {
+                  index: 0,
+                  type: "normal",
+                  weight_kg: 100,
+                  reps: null,
+                  rep_range: { start: 8, end: 12 },
+                  distance_meters: null,
+                  duration_seconds: null,
+                  custom_metric: null,
+                },
+                { index: 1, type: "warmup", weight_kg: 60, reps: 10 },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+    const viewed = objectResult(await h.commands.routine(["view", "r-1"]));
+    const set = {
+      type: null,
+      weightKg: null,
+      reps: null,
+      repRangeStart: null,
+      repRangeEnd: null,
+      distanceMeters: null,
+      durationSeconds: null,
+      customMetric: null,
+    };
+    expect((viewed.result as JsonObject).exercises).toEqual([
+      {
+        title: "Squat",
+        exerciseTemplateId: "e-1",
+        setCount: 2,
+        sets: [
+          {
+            ...set,
+            type: "normal",
+            weightKg: 100,
+            repRangeStart: 8,
+            repRangeEnd: 12,
+          },
+          { ...set, type: "warmup", weightKg: 60, reps: 10 },
+        ],
+      },
+    ]);
+  });
+
+  it("rejects a routine set rep range that is not an object", async () => {
+    const h = harness({
+      responder: () => ({
+        routine: {
+          ...ROUTINE,
+          exercises: [
+            {
+              title: "Squat",
+              exercise_template_id: "e-1",
+              sets: [{ index: 0, type: "normal", rep_range: "8-12" }],
+            },
+          ],
+        },
+      }),
+    });
+    await expect(h.commands.routine(["view", "r-1"])).rejects.toMatchObject({
+      code: "PROTOCOL_ERROR",
+    });
+  });
+
   it("maps exercise list/view/history and compacts both schemas", async () => {
     const h = harness();
     const listed = objectResult(await h.commands.exercise(["list"]));

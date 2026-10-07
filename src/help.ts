@@ -73,7 +73,7 @@ Examples:
 
 Actions:
   list                List routines
-  view <id>           View one routine
+  view <id>           View one routine with each exercise's planned sets
   create              Create a routine from JSON
   update <id>         Fully replace a routine from JSON (all fields required)
 
