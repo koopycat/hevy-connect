@@ -1,7 +1,8 @@
 import { constants as fsConstants } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   installSessionStartHooks,
@@ -38,6 +39,7 @@ import {
   formatResult,
   parseFields,
   projectFields,
+  shellArgument,
 } from "./output.js";
 import type { JsonObject, JsonValue } from "./types.js";
 import { VERSION } from "./version.js";
@@ -51,6 +53,8 @@ const MAX_AUTO_ITEMS = 5000;
 const HOOK_MARKER = "hevy-axi";
 const BINARY_NAMES = ["hevy-axi"];
 const DEFAULT_EVENTS_SINCE = "1970-01-01T00:00:00Z";
+// Both src/ (tsx) and dist/ (build) sit directly below the checkout root.
+const CHECKOUT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const AVAILABLE_COMPACT_FIELDS: Readonly<
   Record<CompactKind, readonly string[]>
@@ -174,6 +178,8 @@ interface ListSpec {
   readonly actionName?: string;
   readonly supportsView?: boolean;
   readonly extraQuery?: Readonly<Record<string, string>>;
+  /** Flags that reproduce caller-supplied filters in continuation commands. */
+  readonly continuationArgs?: readonly string[];
   readonly legacyArrayKey?: string;
   readonly exactCount?: (client: ClientLike) => Promise<number>;
 }
@@ -196,11 +202,9 @@ const READ_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG);
 const SETUP_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG, {
   confirm: { kind: "boolean" },
 });
-const UPDATE_FLAGS: Readonly<Record<string, FlagDefinition>> = {
+const UPDATE_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG, {
   check: { kind: "boolean" },
-  json: { kind: "boolean" },
-  help: { kind: "boolean" },
-};
+});
 
 function objectValue(value: JsonValue, description: string): JsonObject {
   if (value === null || Array.isArray(value) || typeof value !== "object") {
@@ -237,6 +241,19 @@ function stringValue(value: JsonValue | undefined): string | null {
 
 function arrayLength(value: JsonValue | undefined): number {
   return Array.isArray(value) ? value.length : 0;
+}
+
+function compactSet(value: JsonValue): JsonObject {
+  const set = objectValue(value, "workout set");
+  return {
+    type: scalar(set.type),
+    weightKg: scalar(set.weight_kg),
+    reps: scalar(set.reps),
+    distanceMeters: scalar(set.distance_meters),
+    durationSeconds: scalar(set.duration_seconds),
+    rpe: scalar(set.rpe),
+    customMetric: scalar(set.custom_metric),
+  };
 }
 
 function compactWorkout(value: JsonValue, detail = false): JsonObject {
@@ -276,6 +293,7 @@ function compactWorkout(value: JsonValue, detail = false): JsonObject {
         title: scalar(item.title),
         exerciseTemplateId: scalar(item.exercise_template_id),
         setCount: arrayLength(item.sets),
+        sets: Array.isArray(item.sets) ? item.sets.map(compactSet) : [],
       };
     });
   }
@@ -390,21 +408,31 @@ function compact(
 }
 
 function validateIdentifier(value: string, name: string): string {
-  if (value.trim() === "" || /[\0\r\n]/u.test(value)) {
+  // encodeURIComponent keeps dots, and URL parsing would resolve "." and ".."
+  // to a different endpoint.
+  if (
+    value.trim() === "" ||
+    value === "." ||
+    value === ".." ||
+    /[\0\r\n]/u.test(value)
+  ) {
     throw validationError(`${name} is invalid.`);
   }
   return encodeURIComponent(value);
+}
+
+function isCalendarDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value
+  );
 }
 
 function validateDate(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
     throw validationError("Date must use YYYY-MM-DD format.");
   }
-  const date = new Date(`${value}T00:00:00Z`);
-  if (
-    Number.isNaN(date.valueOf()) ||
-    date.toISOString().slice(0, 10) !== value
-  ) {
+  if (!isCalendarDate(value)) {
     throw validationError(
       "Date must be a valid calendar date in YYYY-MM-DD format.",
     );
@@ -412,13 +440,26 @@ function validateDate(value: string): string {
   return value;
 }
 
+const ISO_DATE_OR_TIMESTAMP =
+  /^(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2}))?$/u;
+
 function validateIso(
   value: string | undefined,
   name: string,
 ): string | undefined {
-  if (value !== undefined && Number.isNaN(Date.parse(value))) {
+  if (value === undefined) {
+    return undefined;
+  }
+  // Date.parse alone accepts free text such as "1" or "June 3" and rolls
+  // impossible days such as February 30 over into the next month.
+  const match = ISO_DATE_OR_TIMESTAMP.exec(value);
+  if (
+    match === null ||
+    Number.isNaN(Date.parse(value)) ||
+    !isCalendarDate(match[1] ?? "")
+  ) {
     throw validationError(
-      `${name} must be a valid ISO-8601 date or timestamp.`,
+      `${name} must be a YYYY-MM-DD date or an ISO-8601 timestamp with an offset, such as 2024-01-01T00:00:00Z.`,
     );
   }
   return value;
@@ -466,12 +507,14 @@ async function listResource(
   spec: ListSpec,
 ): Promise<JsonValue> {
   const page = positiveSafeInteger(stringFlag(parsed, "page"), "--page") ?? 1;
+  const all = booleanFlag(parsed, "all");
+  // A smaller default page keeps a single page compact; --all wants the fewest
+  // requests.
   const pageSize =
     positiveSafeInteger(stringFlag(parsed, "page-size"), "--page-size") ??
-    spec.defaultPageSize ??
+    (all ? undefined : spec.defaultPageSize) ??
     spec.maximumPageSize;
   const limit = positiveSafeInteger(stringFlag(parsed, "limit"), "--limit");
-  const all = booleanFlag(parsed, "all");
   if (pageSize > spec.maximumPageSize) {
     throw validationError(
       `--page-size must not exceed ${spec.maximumPageSize}.`,
@@ -488,6 +531,9 @@ async function listResource(
   let currentPage = startPage;
   let pageCount = startPage;
   let fetchedPages = 0;
+  let seenCount = 0;
+  let acceptedFromPage = 0;
+  let omittedFromPage = 0;
   const items: JsonValue[] = [];
   let fetching = true;
   while (fetching) {
@@ -542,16 +588,22 @@ async function listResource(
         "Hevy returned invalid pagination metadata.",
       );
     }
-    for (const item of pageItems) {
-      if (items.length >= MAX_AUTO_ITEMS) {
-        throw validationError(
-          `Automatic pagination exceeds the safety cap of ${MAX_AUTO_ITEMS} items.`,
-        );
-      }
-      if (limit === undefined || items.length < limit) {
-        items.push(item);
-      }
+    // Record what a limit leaves out of this page, so that hasMore and the
+    // continuation command never silently skip items.
+    const room =
+      limit === undefined
+        ? pageItems.length
+        : Math.max(0, limit - items.length);
+    const accepted = pageItems.slice(0, room);
+    if (items.length + accepted.length > MAX_AUTO_ITEMS) {
+      throw validationError(
+        `Automatic pagination exceeds the safety cap of ${MAX_AUTO_ITEMS} items.`,
+      );
     }
+    items.push(...accepted);
+    seenCount += pageItems.length;
+    acceptedFromPage = accepted.length;
+    omittedFromPage = pageItems.length - accepted.length;
     fetchedPages += 1;
     if (
       !all ||
@@ -566,9 +618,14 @@ async function listResource(
     }
   }
 
-  const limitReached =
-    limit !== undefined && items.length >= limit && currentPage < pageCount;
-  const hasMore = currentPage < pageCount;
+  const hasMore = currentPage < pageCount || omittedFromPage > 0;
+  // A limit that ends inside a page resumes at that same page, whose first
+  // `skip` items were already returned.
+  const resume: JsonObject | undefined =
+    omittedFromPage > 0
+      ? { page: currentPage, skip: acceptedFromPage }
+      : undefined;
+  const nextPage = resume === undefined ? currentPage + 1 : currentPage;
   const options = commonOptions(parsed);
   if (options.full) {
     return {
@@ -577,6 +634,7 @@ async function listResource(
       resultCount: items.length,
       empty: items.length === 0,
       hasMore,
+      ...(resume === undefined ? {} : { resume }),
       [spec.arrayKey]: items,
     };
   }
@@ -592,20 +650,25 @@ async function listResource(
     resultCount: items.length,
     empty: items.length === 0,
     hasMore,
+    ...(resume === undefined ? {} : { resume }),
     results: selectedResults,
   };
-  if (all && !limitReached && currentPage >= pageCount) {
-    output.totalCount = items.length;
+  if (all && currentPage >= pageCount) {
+    // Every page was read, so the count is exact even when a limit applied.
+    output.totalCount = seenCount;
   } else if (spec.exactCount !== undefined) {
     output.totalCount = await spec.exactCount(client);
   }
-  const listAction = spec.actionName ?? "list";
+  const listCommand = [
+    "hevy-axi",
+    spec.helpName,
+    spec.actionName ?? "list",
+    ...(spec.continuationArgs ?? []).map(shellArgument),
+  ].join(" ");
   output.help = hasMore
-    ? [
-        `hevy-axi ${spec.helpName} ${listAction} --page ${currentPage + 1} --page-size ${pageSize}`,
-      ]
+    ? [`${listCommand} --page ${nextPage} --page-size ${pageSize}`]
     : [
-        `hevy-axi ${spec.helpName} ${listAction} --all`,
+        `${listCommand} --all`,
         ...(spec.supportsView === false
           ? []
           : [
@@ -1466,9 +1529,8 @@ function workoutHandler(
     if (booleanFlag(parsed, "help"))
       return Promise.resolve(helpResult("workout"));
     requirePositionalCount(parsed, 0, "hevy-axi workout events [flags]");
-    const since =
-      validateIso(stringFlag(parsed, "since"), "--since") ??
-      DEFAULT_EVENTS_SINCE;
+    const requestedSince = validateIso(stringFlag(parsed, "since"), "--since");
+    const since = requestedSince ?? DEFAULT_EVENTS_SINCE;
     return configuredClient(deps).then(async (client) => {
       const options = commonOptions(parsed);
       return formatResult(
@@ -1482,6 +1544,9 @@ function workoutHandler(
             actionName: "events",
             supportsView: false,
             extraQuery: { since },
+            ...(requestedSince === undefined
+              ? {}
+              : { continuationArgs: ["--since", requestedSince] }),
           }),
           { full: options.full },
         ),
@@ -1739,15 +1804,28 @@ function measurementHandler(
 
 function updateHandler(args: string[]): Promise<JsonValue | string> {
   const parsed = parseArgs(args, UPDATE_FLAGS);
-  requirePositionalCount(parsed, 0, "hevy-axi update [--check] [--json]");
+  requirePositionalCount(parsed, 0, "hevy-axi update [--check] [flags]");
   if (booleanFlag(parsed, "help")) return Promise.resolve(helpResult("update"));
+  const options = commonOptions(parsed);
+  // --check is accepted for AXI compatibility; both forms only report, because
+  // this unpublished checkout must be updated by its owner.
   const result: JsonObject = {
     status: "manual_update_required",
     currentVersion: VERSION,
-    checkoutCommands: ["pnpm install --frozen-lockfile", "just check"],
+    checkout: CHECKOUT_ROOT,
+    help: [
+      `cd ${shellArgument(CHECKOUT_ROOT)} && git pull --ff-only && just install && just build`,
+      "hevy-axi --version",
+    ],
   };
   return Promise.resolve(
-    formatResult(result, booleanFlag(parsed, "json") ? "json" : "toon"),
+    formatResult(
+      finalizeOutput(result, {
+        full: options.full,
+        ...(options.fields === undefined ? {} : { fields: options.fields }),
+      }),
+      options.format,
+    ),
   );
 }
 
@@ -1792,33 +1870,18 @@ export function homeCommand(deps: CommandDependencies): CommandHandler {
         ],
       };
     } else {
-      const client = deps.clientFactory(config);
-      const [userWire, countWire, recentWire] = await Promise.all([
-        client.get<JsonValue>("/v1/user/info"),
-        client.get<JsonValue>("/v1/workouts/count"),
-        client.get<JsonValue>("/v1/workouts", {
-          query: { page: 1, pageSize: 3 },
-        }),
-      ]);
-      const recent = objectValue(recentWire, "recent workouts response");
-      const account = objectValue(unwrap(userWire, "data"), "user account");
+      // SessionStart hooks inject this view into every agent session, so it
+      // reports local configuration only: no API call, no account or workout
+      // data.
       result = {
         status: "configured",
-        account: options.full
-          ? account
-          : {
-              username: scalar(account.username),
-              weightUnit: scalar(account.weight_unit),
-              distanceUnit: scalar(account.distance_unit),
-            },
-        workoutCount: workoutCountValue(countWire),
-        recentWorkouts: arrayValue(recent.workouts, "recent workouts").map(
-          (entry) => compactWorkout(entry),
-        ),
+        configured: true,
+        credentialSource: credentialCategory(config, deps),
         help: [
           "hevy-axi workout list",
           "hevy-axi routine list",
           "hevy-axi exercise list",
+          "hevy-axi user info",
         ],
       };
     }

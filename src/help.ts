@@ -7,7 +7,7 @@ const COMMON = `Common output flags:
 const PAGINATION = `Pagination flags:
   --page <n>           Fetch page n
   --page-size <n>      Items per API page
-  --limit <n>          Return at most n items
+  --limit <n>          Return at most n items; resume marks a cut page
   --all                Fetch all pages (max 500 pages / 5000 items)`;
 
 const MUTATION = `Mutation flags:
@@ -52,7 +52,7 @@ Actions:
   list                List workouts
   count               Return the exact workout count
   events              List workout update/delete events
-  view <id>           View one workout
+  view <id>           View one workout with each exercise's sets
   create              Create a workout from JSON
   update <id>         Fully replace a workout from JSON (all fields required)
 
@@ -90,7 +90,7 @@ Examples:
   exercise: `Usage: hevy-axi exercise <action> [arguments] [flags]
 
 Actions:
-  list                List exercise templates (default page size 10; max 100)
+  list                List exercise templates (page size 10, or 100 with --all)
   view <id>           View one exercise template
   history <id>        Show exercise set history (default output capped at 50)
   create              Create a custom exercise template
@@ -146,19 +146,19 @@ values. Confirmed updates read the current date, merge the patch, reject unknown
 upstream fields, and PUT one complete replacement body without date. Dry-run
 performs no API request and reports strategy: merge_with_current.`,
 
-  update: `Usage: hevy-axi update [--check] [--json]
+  update: `Usage: hevy-axi update [--check] [flags]
 
-Report the installed version and safe manual update instructions for this private,
-unpublished checkout. This command never contacts npm or changes local files.
+Report the installed version, the checkout it runs from, and the command that
+updates it. This private checkout is not published to npm, so the command never
+contacts npm or changes local files.
 
 Flags:
-  --check             Report update instructions without making changes
-  --json              Return JSON
+  --check             Same read-only report; accepted for AXI compatibility
   --help              Show this help
+${COMMON}
 
-Checkout commands:
-  pnpm install --frozen-lockfile
-  just check`,
+Update command, run in the reported checkout:
+  git pull --ff-only && just install && just build`,
 
   setup: `Usage: hevy-axi setup <action> [flags]
 

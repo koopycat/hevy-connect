@@ -56,6 +56,13 @@ export function formatCliError(
   };
 }
 
+/** Quote a value for a POSIX shell command shown in help output. */
+export function shellArgument(value: string): string {
+  return /^[A-Za-z0-9_/:.+=-]+$/u.test(value)
+    ? value
+    : `'${value.replace(/'/gu, "'\\''")}'`;
+}
+
 export function parseFields(value: string | undefined): string[] | undefined {
   if (value === undefined) {
     return undefined;

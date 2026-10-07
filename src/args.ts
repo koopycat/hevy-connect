@@ -66,7 +66,11 @@ export function parseArgs(
       const next = args[index + 1];
       if (inlineValue !== undefined) {
         value = inlineValue;
-      } else if (next !== undefined && !next.startsWith("-")) {
+      } else if (
+        next !== undefined &&
+        // A bare "-" is the conventional stdin operand, not a flag.
+        (next === "-" || !next.startsWith("-"))
+      ) {
         value = next;
         index += 1;
       } else {

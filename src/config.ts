@@ -204,6 +204,11 @@ async function readCredentialCandidate(
 
   try {
     const openedMetadata = await handle.stat();
+    // A project .env directory, such as a Python virtualenv, cannot hold
+    // credentials and must not block the remaining sources.
+    if (!candidate.required && openedMetadata.isDirectory()) {
+      return undefined;
+    }
     let pathMetadata;
     try {
       pathMetadata = await lstat(candidate.path);
@@ -242,18 +247,6 @@ async function readCredentialCandidate(
         candidate.path,
       );
     }
-    if (
-      process.platform !== "win32" &&
-      ((openedMetadata.mode & 0o077) !== 0 ||
-        (typeof process.getuid === "function" &&
-          openedMetadata.uid !== process.getuid()))
-    ) {
-      throw configError(
-        "CONFIG_INSECURE",
-        "The credential file must be owned by the current user with mode 0600.",
-        candidate.path,
-      );
-    }
     if (openedMetadata.size > MAX_CREDENTIAL_FILE_BYTES) {
       throw configError(
         "CONFIG_ERROR",
@@ -284,10 +277,28 @@ async function readCredentialCandidate(
       );
     }
 
-    return parseEnvironmentFile(
+    const parsed = parseEnvironmentFile(
       buffer.subarray(0, bytesRead).toString("utf8"),
       candidate.path,
     );
+    // Ownership and mode protect Hevy settings only. A file that sets neither
+    // variable, such as an unrelated project .env, is ignored whatever its mode.
+    const configuresHevy =
+      parsed.apiKey !== undefined || parsed.baseUrl !== undefined;
+    if (
+      configuresHevy &&
+      process.platform !== "win32" &&
+      ((openedMetadata.mode & 0o077) !== 0 ||
+        (typeof process.getuid === "function" &&
+          openedMetadata.uid !== process.getuid()))
+    ) {
+      throw configError(
+        "CONFIG_INSECURE",
+        "The credential file must be owned by the current user with mode 0600.",
+        candidate.path,
+      );
+    }
+    return parsed;
   } catch (error) {
     if (error instanceof HevyCliError) {
       throw error;

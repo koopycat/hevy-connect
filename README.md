@@ -60,7 +60,7 @@ printf 'HEVY_API_KEY=%s\n' "$HEVY_API_KEY" > .env
 chmod 600 .env
 ```
 
-On POSIX systems, any credential file containing a key must be a regular, non-symlink file with no group or world permissions (mode `0600`); otherwise the CLI refuses to read it. Global setup secures the directory as `0700`, writes the file atomically as `0600`, and never returns the key. Windows does not expose the same POSIX mode check. `setup remove-key --confirm` removes only the global file, not environment, explicit-file, or project credentials.
+On POSIX systems, any credential file that sets `HEVY_API_KEY` or `HEVY_API_BASE_URL` must be owned by you with no group or world permissions (mode `0600`); otherwise the CLI refuses it. Credential paths must be regular files, never symlinks. A project `.env` that sets neither variable is ignored whatever its mode, as is a `.env` directory such as a Python virtualenv. Global setup secures the directory as `0700`, writes the file atomically as `0600`, and never returns the key. Windows does not expose the same POSIX mode check. `setup remove-key --confirm` removes only the global file, not environment, explicit-file, or project credentials.
 
 ## Commands and API coverage
 
@@ -77,15 +77,17 @@ Every resource supports `--help`. These actions map to the complete documented A
 | `setup`       | `status`, `key`, `remove-key`, `hooks`, `remove-hooks`          | Local credential and ambient-context setup; no Hevy API operation |
 | `update`      | `--check`                                                       | Read-only manual checkout update instructions                     |
 
-Running `hevy-axi` with no arguments is a live home view: when configured, it reads account metadata, workout count, and up to three recent workouts. Use `hevy-axi --help` when live data is not wanted.
+Running `hevy-axi` with no arguments shows the home view: whether a key is configured, its credential source, and next commands. It makes no API call and shows no account or workout data, because the optional SessionStart hooks inject it into every agent session.
 
 ## Output, fields, and pagination
 
 - TOON is the default. Use `--json` or `--format json` for JSON.
 - Default views normalize inconsistent Hevy envelopes and select compact fields. `--fields id,title` projects comma-separated paths from that compact output.
 - `--full` returns the untruncated wire-oriented payload and cannot be combined with `--fields`.
+- `workout view` lists each exercise's sets (type, weight, reps, distance, duration, RPE, and custom metric) without `--full`.
 - Long strings are truncated explicitly in compact output; use `--full` to bypass truncation.
 - Lists accept `--page`, `--page-size`, `--limit`, and `--all`. `--all` starts at page 1 and cannot be combined with `--page`.
+- When `--limit` stops inside a page, `hasMore` is true and `resume: {page, skip}` names that page and how many of its leading items were already returned; the continuation command re-reads that page. `totalCount` appears only when it is exact.
 - API page sizes are at most 10 except exercise templates, which allow 100. Automatic pagination is capped at 500 pages and 5,000 items.
 - Workout events accept `--since <ISO-8601>`. If omitted, the CLI still sends the Unix epoch explicitly.
 - Exercise history is not paginated; constrain it with `--start` and `--end` when possible.
@@ -135,13 +137,13 @@ Mutation input may also come from stdin with `--file -`. It must be a JSON objec
 
 ## Errors and exit codes
 
-Results and errors are structured as TOON or JSON on stdout so callers can parse both paths. Error objects contain a stable `code`, safe message, optional redacted details, and suggestions. The API key is centrally redacted from upstream error bodies.
+Results and errors are structured as TOON or JSON on stdout so callers can parse both paths. Error objects contain a stable `code`, safe message, optional redacted details, and suggestions. The API key is centrally redacted from upstream error bodies. HTTP failures append Hevy's `{error}` text to the message; network failures report only the system error code, such as `ECONNREFUSED`, as `details.cause`.
 
-| Exit | Meaning                                                                                          |
-| ---: | ------------------------------------------------------------------------------------------------ |
-|  `0` | Success, including a closed downstream pipe (`EPIPE`)                                            |
-|  `1` | Configuration, network, timeout, API, authentication, not-found, rate-limit, or protocol failure |
-|  `2` | Invalid command, flag, argument, input, or unsafe local configuration                            |
+| Exit | Meaning                                                                                                                                                                                                     |
+| ---: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  `0` | Success, including a closed downstream pipe (`EPIPE`)                                                                                                                                                       |
+|  `1` | Configuration, network, timeout, protocol, or API failure: `BAD_REQUEST` (400), `AUTH_ERROR` (401), `FORBIDDEN` (403, including account limits), `NOT_FOUND`, `CONFLICT` (409), `RATE_LIMITED`, `API_ERROR` |
+|  `2` | Invalid command, flag, argument, input, or unsafe local configuration (`CONFIG_INSECURE`)                                                                                                                   |
 
 Unknown commands and flags fail loudly. Requests time out after 20 seconds, successful bodies are bounded to 10 MiB, and error bodies to 8 KiB.
 
@@ -154,7 +156,7 @@ hevy-axi setup hooks --confirm
 hevy-axi setup status
 ```
 
-This installs user-scoped integration for Claude Code and Codex and an OpenCode ambient-context plugin. It runs the live home view once at session start, so account and recent-workout metadata may enter the agent context; the API key never does. Installation is explicit and does not run during ordinary commands. Remove only the managed entries with:
+This installs user-scoped integration for Claude Code and Codex and an OpenCode ambient-context plugin. It runs the home view once at session start. That view makes no API call and contains only configuration status and next commands, never the API key, account, or workout data. Installation is explicit and does not run during ordinary commands. Remove only the managed entries with:
 
 ```bash
 hevy-axi setup remove-hooks --confirm

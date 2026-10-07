@@ -2,6 +2,7 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -31,6 +32,7 @@ import {
   parseFields,
   projectFields,
   renderOutput,
+  shellArgument,
   truncateOutput,
 } from "../src/output.js";
 import type { JsonObject, JsonValue } from "../src/types.js";
@@ -374,6 +376,16 @@ describe("argument parsing", () => {
     expect(stringFlag(parsed, "name")).toBe("value");
   });
 
+  it("accepts a separate bare - as the stdin operand value", () => {
+    expect(parseArgs(["--name", "-", "--verbose"], definitions)).toEqual({
+      positionals: [],
+      flags: { name: "-", verbose: true },
+    });
+    expect(() => parseArgs(["--name", "-x"], definitions)).toThrow(
+      "requires a value",
+    );
+  });
+
   it.each([
     [["-v"], "Unknown flag"],
     [["--missing"], "Unknown flag"],
@@ -430,6 +442,15 @@ describe("argument parsing", () => {
 });
 
 describe("output helpers", () => {
+  it("quotes only shell arguments that need it", () => {
+    expect(shellArgument("/src/hevy-axi")).toBe("/src/hevy-axi");
+    expect(shellArgument("2024-01-01T10:00:00+02:00")).toBe(
+      "2024-01-01T10:00:00+02:00",
+    );
+    expect(shellArgument("/My Projects/hevy")).toBe("'/My Projects/hevy'");
+    expect(shellArgument("it's")).toBe("'it'\\''s'");
+  });
+
   it("renders JSON and TOON and returns JSON strings only for JSON format", () => {
     const value: JsonObject = { name: "sample", count: 2 };
     expect(JSON.parse(renderOutput(value, "json"))).toEqual(value);
@@ -592,18 +613,34 @@ describe("help", () => {
 
   it("documents the read-only manual update command", async () => {
     const h = harness();
+    const checkout = fileURLToPath(new URL("..", import.meta.url)).replace(
+      /\/$/u,
+      "",
+    );
     const result = objectResult(await h.commands.update([]));
     expect(result).toEqual({
       status: "manual_update_required",
       currentVersion: "0.1.0",
-      checkoutCommands: ["pnpm install --frozen-lockfile", "just check"],
+      checkout,
+      help: [
+        `cd ${shellArgument(checkout)} && git pull --ff-only && just install && just build`,
+        "hevy-axi --version",
+      ],
     });
+    for (const args of [
+      ["--check", "--json"],
+      ["--check", "--format", "json"],
+    ]) {
+      expect(JSON.parse((await h.commands.update(args)) as string)).toEqual(
+        result,
+      );
+    }
     expect(
-      JSON.parse((await h.commands.update(["--check", "--json"])) as string),
-    ).toEqual(result);
+      objectResult(await h.commands.update(["--fields", "currentVersion"])),
+    ).toEqual({ currentVersion: "0.1.0" });
     expect(commandHelp("update")).toContain("private");
-    expect(commandHelp("update")).toContain("pnpm install --frozen-lockfile");
-    expect(commandHelp("update")).toContain("just check");
+    expect(commandHelp("update")).toContain("AXI compatibility");
+    expect(commandHelp("update")).toContain("git pull --ff-only");
     expect(h.resolveConfig).not.toHaveBeenCalled();
     expect(h.clientFactory).not.toHaveBeenCalled();
   });
@@ -676,6 +713,126 @@ describe("all 22 Hevy operation routes and compact schemas", () => {
     expect(viewed).toMatchObject({
       result: { id: "w-1", setCount: 2, exerciseCount: 1 },
     });
+  });
+
+  it("lists each exercise's sets in the compact workout view", async () => {
+    const h = harness({
+      responder: () => ({
+        ...WORKOUT,
+        exercises: [
+          {
+            title: "Squat",
+            exercise_template_id: "e-1",
+            sets: [
+              { index: 0, type: "warmup", weight_kg: 60, reps: 8 },
+              {
+                index: 1,
+                type: "normal",
+                weight_kg: 100,
+                reps: 5,
+                distance_meters: null,
+                duration_seconds: null,
+                rpe: 8,
+                custom_metric: null,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const viewed = objectResult(await h.commands.workout(["view", "w-1"]));
+    const set = {
+      type: null,
+      weightKg: null,
+      reps: null,
+      distanceMeters: null,
+      durationSeconds: null,
+      rpe: null,
+      customMetric: null,
+    };
+    expect((viewed.result as JsonObject).exercises).toEqual([
+      {
+        title: "Squat",
+        exerciseTemplateId: "e-1",
+        setCount: 2,
+        sets: [
+          { ...set, type: "warmup", weightKg: 60, reps: 8 },
+          { ...set, type: "normal", weightKg: 100, reps: 5, rpe: 8 },
+        ],
+      },
+    ]);
+  });
+
+  it("rejects . and .. IDs that URL parsing would resolve to another endpoint", async () => {
+    const h = harness();
+    for (const id of [".", ".."]) {
+      await expectValidation(
+        Promise.resolve().then(() => h.commands.workout(["view", id])),
+      );
+      await expectValidation(
+        Promise.resolve().then(() =>
+          h.commands.routine([
+            "update",
+            id,
+            "--file",
+            mutationFiles.routine ?? "",
+            "--dry-run",
+          ]),
+        ),
+      );
+    }
+    expect(h.client.calls).toHaveLength(0);
+  });
+
+  it("accepts only ISO-8601 dates and offset timestamps as time filters", async () => {
+    const h = harness();
+    for (const value of [
+      "1",
+      "June 3",
+      "2024-01-01 10:00",
+      "2024-01-01T10:00:00",
+      "2024-02-30",
+      "2024-02-30T00:00:00Z",
+    ]) {
+      await expectValidation(
+        Promise.resolve().then(() =>
+          h.commands.workout(["events", "--since", value]),
+        ),
+      );
+      await expectValidation(
+        Promise.resolve().then(() =>
+          h.commands.exercise(["history", "e-1", "--start", value]),
+        ),
+      );
+    }
+    expect(h.client.calls).toHaveLength(0);
+
+    await h.commands.exercise([
+      "history",
+      "e-1",
+      "--start",
+      "2024-01-01",
+      "--end",
+      "2024-12-31T23:59:59.999+01:00",
+    ]);
+    expect(h.client.calls[0]?.options?.query).toEqual({
+      start_date: "2024-01-01",
+      end_date: "2024-12-31T23:59:59.999+01:00",
+    });
+  });
+
+  it("uses the maximum page size for --all unless one is given", async () => {
+    const pageSizes: unknown[] = [];
+    for (const args of [
+      ["list"],
+      ["list", "--all"],
+      ["list", "--all", "--page-size", "20"],
+    ]) {
+      const h = harness();
+      await h.commands.exercise(args);
+      pageSizes.push(h.client.calls[0]?.options?.query?.pageSize);
+    }
+    expect(pageSizes).toEqual([10, 100, 20]);
   });
 
   it("maps routine list/view and uses the compact routine schema", async () => {
@@ -906,9 +1063,8 @@ describe("mutation commands", () => {
       const args = [
         testCase.action,
         ...(testCase.id === undefined ? [] : [testCase.id]),
-        ...(testCase.stdin === undefined
-          ? ["--file", file ?? ""]
-          : ["--file=-"]),
+        "--file",
+        file ?? "",
         "--confirm",
       ];
       const result = objectResult(await h.commands[testCase.command](args));
@@ -1007,7 +1163,8 @@ describe("mutation commands", () => {
       await h.commands.measurement([
         "update",
         "2024-08-14",
-        "--file=-",
+        "--file",
+        "-",
         "--dry-run",
         "--full",
       ]),
@@ -1033,7 +1190,8 @@ describe("mutation commands", () => {
       await h.commands.measurement([
         "update",
         "2024-08-14",
-        "--file=-",
+        "--file",
+        "-",
         "--confirm",
       ]),
     );
@@ -1236,6 +1394,130 @@ describe("pagination, events, and protocol validation", () => {
     expect(h.client.calls).toHaveLength(1);
     expect(result).toMatchObject({ resultCount: 1, hasMore: true });
     expect(result).not.toHaveProperty("totalCount");
+  });
+
+  describe("limits that end inside a page", () => {
+    function pagedRoutines(total: number): Responder {
+      const routines = Array.from({ length: total }, (_, index) => ({
+        ...ROUTINE,
+        id: `r-${index + 1}`,
+      }));
+      return (call) => {
+        const requested = Number(call.options?.query?.page);
+        const size = Number(call.options?.query?.pageSize);
+        return {
+          page: requested,
+          page_count: Math.ceil(total / size),
+          routines: routines.slice((requested - 1) * size, requested * size),
+        };
+      };
+    }
+
+    it("reports omitted items on a single page and resumes at that page", async () => {
+      const h = harness({ responder: pagedRoutines(7) });
+      const result = objectResult(
+        await h.commands.routine(["list", "--limit", "3"]),
+      );
+      expect(result).toMatchObject({
+        pageCount: 1,
+        resultCount: 3,
+        hasMore: true,
+        resume: { page: 1, skip: 3 },
+        help: ["hevy-axi routine list --page 1 --page-size 10"],
+      });
+      expect(result).not.toHaveProperty("totalCount");
+    });
+
+    it("reports the true total, not the limit, once every page was read", async () => {
+      const h = harness({ responder: pagedRoutines(7) });
+      const result = objectResult(
+        await h.commands.routine(["list", "--all", "--limit", "3"]),
+      );
+      expect(result).toMatchObject({
+        resultCount: 3,
+        totalCount: 7,
+        hasMore: true,
+        resume: { page: 1, skip: 3 },
+      });
+    });
+
+    it("resumes inside the page where an --all limit stopped", async () => {
+      const h = harness({ responder: pagedRoutines(25) });
+      const result = objectResult(
+        await h.commands.routine(["list", "--all", "--limit", "15"]),
+      );
+      expect(h.client.calls.map((call) => call.options?.query?.page)).toEqual([
+        1, 2,
+      ]);
+      expect(result).toMatchObject({
+        resultCount: 15,
+        hasMore: true,
+        resume: { page: 2, skip: 5 },
+        help: ["hevy-axi routine list --page 2 --page-size 10"],
+      });
+      expect(result).not.toHaveProperty("totalCount");
+    });
+
+    it("continues with the next page when a limit ends on a page boundary", async () => {
+      const h = harness({ responder: pagedRoutines(25) });
+      const result = objectResult(
+        await h.commands.routine(["list", "--all", "--limit", "10"]),
+      );
+      expect(result).toMatchObject({
+        resultCount: 10,
+        hasMore: true,
+        help: ["hevy-axi routine list --page 2 --page-size 10"],
+      });
+      expect(result).not.toHaveProperty("resume");
+    });
+
+    it("includes resume metadata in --full output", async () => {
+      const h = harness({ responder: pagedRoutines(7) });
+      const result = objectResult(
+        await h.commands.routine(["list", "--limit", "2", "--full"]),
+      );
+      expect(result).toMatchObject({
+        resultCount: 2,
+        hasMore: true,
+        resume: { page: 1, skip: 2 },
+      });
+    });
+  });
+
+  it("keeps a caller-supplied --since in event continuation commands", async () => {
+    const h = harness({
+      responder(call) {
+        return {
+          page: Number(call.options?.query?.page),
+          page_count: 2,
+          events: [{ type: "deleted", id: "w-1", deleted_at: "2024-01-02" }],
+        };
+      },
+    });
+    const since = "2024-01-01T00:00:00Z";
+    const paged = objectResult(
+      await h.commands.workout(["events", "--since", since]),
+    );
+    expect(paged.help).toEqual([
+      `hevy-axi workout events --since ${since} --page 2 --page-size 10`,
+    ]);
+
+    const offset = objectResult(
+      await h.commands.workout([
+        "events",
+        "--since",
+        "2024-01-01T10:00:00+02:00",
+        "--all",
+      ]),
+    );
+    expect(offset.help).toEqual([
+      "hevy-axi workout events --since 2024-01-01T10:00:00+02:00 --all",
+    ]);
+
+    const unfiltered = objectResult(await h.commands.workout(["events"]));
+    expect(unfiltered.help).toEqual([
+      "hevy-axi workout events --page 2 --page-size 10",
+    ]);
   });
 
   it.each(["routine_folders", "routines"])(
@@ -1646,33 +1928,22 @@ describe("home command", () => {
     expect(h.clientFactory).not.toHaveBeenCalled();
   });
 
-  it("loads account, count, and three recent workouts when configured", async () => {
+  it("reports configuration only, without an API call, when configured", async () => {
     const h = harness();
     const result = objectResult(await homeCommand(h.deps)([]));
-    expect(h.client.calls.map((call) => call.path)).toEqual([
-      "/v1/user/info",
-      "/v1/workouts/count",
-      "/v1/workouts",
-    ]);
-    expect(h.client.calls[2]?.options?.query).toEqual({ page: 1, pageSize: 3 });
-    expect(result).toMatchObject({
+    expect(h.clientFactory).not.toHaveBeenCalled();
+    expect(h.client.calls).toHaveLength(0);
+    expect(result).toEqual({
       status: "configured",
-      account: {
-        username: "tester",
-        weightUnit: "kg",
-        distanceUnit: "km",
-      },
-      workoutCount: 12,
-      recentWorkouts: [{ id: "w-1", exerciseCount: 1 }],
+      configured: true,
+      credentialSource: "environment",
+      help: [
+        "hevy-axi workout list",
+        "hevy-axi routine list",
+        "hevy-axi exercise list",
+        "hevy-axi user info",
+      ],
     });
-    expect(Object.keys(result.account as JsonObject)).toEqual([
-      "username",
-      "weightUnit",
-      "distanceUnit",
-    ]);
-    expect(result.account).not.toHaveProperty("id");
-    expect(result.account).not.toHaveProperty("name");
-    expect(result.account).not.toHaveProperty("url");
   });
 
   it("supports home help, fields, JSON, and strict positionals", async () => {

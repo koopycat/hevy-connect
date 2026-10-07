@@ -47,5 +47,7 @@ export function isHevyCliError(error: unknown): error is HevyCliError {
 }
 
 export function exitCodeForHevyError(error: HevyCliError): number {
-  return error.code === "VALIDATION_ERROR" ? 2 : 1;
+  return error.code === "VALIDATION_ERROR" || error.code === "CONFIG_INSECURE"
+    ? 2
+    : 1;
 }

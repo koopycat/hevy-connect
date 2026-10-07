@@ -177,21 +177,103 @@ function retryAfterDelay(
   return Math.min(Math.max(0, date - now), MAX_RETRY_AFTER_MS);
 }
 
+/**
+ * The system error code behind a fetch failure, such as ECONNREFUSED or
+ * ENOTFOUND. Messages are never reported because they can echo request data.
+ */
+function networkErrorCode(error: unknown): string | undefined {
+  const candidates = [error instanceof Error ? error.cause : undefined, error];
+  for (const candidate of candidates) {
+    if (
+      candidate !== null &&
+      typeof candidate === "object" &&
+      "code" in candidate &&
+      typeof candidate.code === "string" &&
+      /^[A-Z][A-Z0-9_]*$/u.test(candidate.code)
+    ) {
+      return candidate.code;
+    }
+  }
+  return undefined;
+}
+
 function retryableStatus(status: number): boolean {
   return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
-function httpErrorCode(status: number): string {
-  if (status === 401 || status === 403) {
-    return "AUTH_ERROR";
+interface HttpFailure {
+  readonly code: string;
+  readonly message: string;
+  readonly suggestions: readonly string[];
+}
+
+function httpFailure(status: number): HttpFailure {
+  switch (status) {
+    case 400:
+      return {
+        code: "BAD_REQUEST",
+        message: "Hevy rejected the request as invalid",
+        suggestions: [],
+      };
+    case 401:
+      return {
+        code: "AUTH_ERROR",
+        message: "Hevy rejected the API credentials",
+        suggestions: ["Check the configured Hevy API key and account access."],
+      };
+    case 403:
+      // Hevy also answers 403 for account limits, which no key change fixes.
+      return {
+        code: "FORBIDDEN",
+        message: "Hevy refused the request",
+        suggestions: [
+          "Hevy uses 403 for account limits such as the routine or custom-exercise limit; see details.body.",
+          "If every request returns 403, check the API key and the account's Hevy Pro access.",
+        ],
+      };
+    case 404:
+      return {
+        code: "NOT_FOUND",
+        message: "The requested Hevy resource was not found",
+        suggestions: [],
+      };
+    case 409:
+      return {
+        code: "CONFLICT",
+        message: "The request conflicts with existing Hevy data",
+        suggestions: [
+          "The target may already exist; read the current Hevy state before retrying.",
+        ],
+      };
+    case 429:
+      return {
+        code: "RATE_LIMITED",
+        message: "Hevy rate-limited the request",
+        suggestions: [],
+      };
+    default:
+      return {
+        code: "API_ERROR",
+        message: `The Hevy API returned HTTP ${status}`,
+        suggestions: [],
+      };
   }
-  if (status === 404) {
-    return "NOT_FOUND";
+}
+
+/** The documented `{error: string}` text of an already redacted error body. */
+function upstreamErrorText(body: JsonValue | undefined): string | undefined {
+  if (
+    body === undefined ||
+    body === null ||
+    Array.isArray(body) ||
+    typeof body !== "object"
+  ) {
+    return undefined;
   }
-  if (status === 429) {
-    return "RATE_LIMITED";
-  }
-  return "API_ERROR";
+  const text = body.error;
+  return typeof text === "string" && text.trim() !== ""
+    ? text.trim()
+    : undefined;
 }
 
 function mutationFailureSuggestions(method: HttpMethod): string[] {
@@ -200,19 +282,6 @@ function mutationFailureSuggestions(method: HttpMethod): string[] {
         "The mutation outcome may be unknown. Inspect Hevy before manually retrying to avoid a duplicate or overwrite.",
       ]
     : [];
-}
-
-function httpErrorMessage(status: number): string {
-  if (status === 401 || status === 403) {
-    return "Hevy rejected the API credentials or denied access.";
-  }
-  if (status === 404) {
-    return "The requested Hevy resource was not found.";
-  }
-  if (status === 429) {
-    return "Hevy rate-limited the request.";
-  }
-  return `The Hevy API returned HTTP ${status}.`;
 }
 
 export class HevyClient {
@@ -351,16 +420,17 @@ export class HevyClient {
             details.bodyTruncated = true;
           }
 
+          const failure = httpFailure(response.status);
+          const upstream = upstreamErrorText(safeBody);
           throw new HevyCliError(
-            httpErrorCode(response.status),
-            httpErrorMessage(response.status),
+            failure.code,
+            upstream === undefined
+              ? `${failure.message}.`
+              : `${failure.message}: ${upstream}`,
             {
               status: response.status,
               details,
-              suggestions:
-                response.status === 401 || response.status === 403
-                  ? ["Check the configured Hevy API key and account access."]
-                  : [],
+              suggestions: failure.suggestions,
             },
           );
         }
@@ -384,10 +454,14 @@ export class HevyClient {
         if (attempt < retries) {
           retryDelay = Math.min(BASE_RETRY_DELAY_MS * 2 ** attempt, 2_000);
         } else {
+          const cause = networkErrorCode(error);
           throw new HevyCliError(
             "NETWORK_ERROR",
             "The Hevy API request failed.",
-            { suggestions: mutationFailureSuggestions(method) },
+            {
+              suggestions: mutationFailureSuggestions(method),
+              ...(cause === undefined ? {} : { details: { cause } }),
+            },
           );
         }
       } finally {

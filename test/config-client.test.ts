@@ -411,6 +411,42 @@ describe("configuration resolution", () => {
     },
   );
 
+  it.runIf(process.platform !== "win32")(
+    "ignores a group- or world-readable project .env without Hevy settings",
+    async () => {
+      const root = await makeTempRoot();
+      const homeDir = join(root, "home");
+      const project = join(root, "work");
+      const stored = join(homeDir, ".config/hevy-axi/credentials.env");
+      await writeCredential(join(project, ".env"), "DATABASE_URL=x\n", 0o644);
+      await writeCredential(stored, "HEVY_API_KEY=global-key\n");
+
+      await expect(
+        resolveConfig({ cwd: project, homeDir, env: {} }),
+      ).resolves.toEqual({
+        apiKey: "global-key",
+        baseUrl: DEFAULT_BASE_URL,
+        credentialSource: stored,
+      });
+    },
+  );
+
+  it("ignores a project .env directory such as a virtualenv", async () => {
+    const root = await makeTempRoot();
+    const homeDir = join(root, "home");
+    const project = join(root, "work");
+    const stored = join(homeDir, ".config/hevy-axi/credentials.env");
+    await mkdir(join(project, ".env", "bin"), { recursive: true });
+    await writeCredential(stored, "HEVY_API_KEY=global-key\n");
+
+    await expect(
+      resolveConfig({ cwd: project, homeDir, env: {} }),
+    ).resolves.toMatchObject({
+      apiKey: "global-key",
+      credentialSource: stored,
+    });
+  });
+
   it("rejects credential files larger than 64 KiB", async () => {
     const root = await makeTempRoot();
     const file = join(root, "work", ".env");
@@ -1026,9 +1062,11 @@ describe("HevyClient redirect protection", () => {
 
 describe("HevyClient failures", () => {
   it.each([
+    [400, "BAD_REQUEST"],
     [401, "AUTH_ERROR"],
-    [403, "AUTH_ERROR"],
+    [403, "FORBIDDEN"],
     [404, "NOT_FOUND"],
+    [409, "CONFLICT"],
     [429, "RATE_LIMITED"],
     [500, "API_ERROR"],
   ])("maps HTTP %i to structured %s errors", async (status, code) => {
@@ -1050,8 +1088,8 @@ describe("HevyClient failures", () => {
     });
   });
 
-  it("adds an authentication suggestion for 401 and 403 only", async () => {
-    for (const status of [401, 403, 404]) {
+  it("suggests a key check for 401 and an account limit for 403", async () => {
+    const suggestionsFor = async (status: number): Promise<string> => {
       const mockedFetch = fetchMock(async () =>
         Promise.resolve(new Response("denied", { status })),
       );
@@ -1064,9 +1102,59 @@ describe("HevyClient failures", () => {
         caught = error;
       }
       expect(caught).toBeInstanceOf(HevyCliError);
-      const suggestions = (caught as HevyCliError).suggestions;
-      expect(suggestions.length > 0).toBe(status === 401 || status === 403);
+      return (caught as HevyCliError).suggestions.join(" ");
+    };
+
+    expect(await suggestionsFor(401)).toMatch(/API key/);
+    expect(await suggestionsFor(403)).toMatch(/account limits/);
+    expect(await suggestionsFor(404)).toBe("");
+  });
+
+  it("uses Hevy's redacted error text in the message", async () => {
+    const secret = "message-secret-key";
+    const mockedFetch = fetchMock(async () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ error: `Routine limit exceeded for ${secret}` }),
+          { status: 403, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      clientWith(mockedFetch, { apiKey: secret, maxReadRetries: 0 }).post(
+        "/v1/routines",
+      ),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message:
+        "Hevy refused the request: Routine limit exceeded for [REDACTED]",
+    });
+  });
+
+  it("reports the system error code, never the message, of a network failure", async () => {
+    const secret = "network-cause-secret";
+    const mockedFetch = fetchMock(async () =>
+      Promise.reject(
+        new TypeError("fetch failed", {
+          cause: Object.assign(new Error(`connect ECONNREFUSED ${secret}`), {
+            code: "ECONNREFUSED",
+          }),
+        }),
+      ),
+    );
+    let caught: unknown;
+    try {
+      await clientWith(mockedFetch, { maxReadRetries: 0 }).get("/v1/resource");
+    } catch (error) {
+      caught = error;
     }
+
+    expect(caught).toMatchObject({
+      code: "NETWORK_ERROR",
+      details: { cause: "ECONNREFUSED" },
+    });
+    expect(errorSnapshot(caught)).not.toContain(secret);
   });
 
   it("redacts the API key from nested error values and object keys", async () => {
@@ -1339,6 +1427,12 @@ describe("error helpers", () => {
       suggestions: ["fix it"],
     });
     expect(exitCodeForHevyError(validation)).toBe(2);
+    expect(
+      exitCodeForHevyError(new HevyCliError("CONFIG_INSECURE", "unsafe")),
+    ).toBe(2);
+    expect(exitCodeForHevyError(new HevyCliError("CONFIG_ERROR", "bad"))).toBe(
+      1,
+    );
     expect(exitCodeForHevyError(api)).toBe(1);
   });
 });
