@@ -16,6 +16,14 @@ run *ARGS:
 build:
     pnpm build
 
+# Regenerate Hevy API types from docs/hevy-openapi.json
+api-types:
+    pnpm api:types
+
+# Refresh the Hevy OpenAPI capture from the live docs and regenerate types
+api-sync:
+    pnpm api:sync
+
 # Run unit and integration tests
 test:
     pnpm test
