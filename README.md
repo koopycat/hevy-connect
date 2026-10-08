@@ -10,7 +10,7 @@ Hevy describes its [Public API](https://api.hevyapp.com/docs/) as an early rollo
 
 ## Install and run
 
-Requirements: Node.js 20 or newer, pnpm 12, and `just`.
+Requirements: Node.js 24 or newer (an LTS release), pnpm 12, and `just`.
 
 ```bash
 just install

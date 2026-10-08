@@ -29,10 +29,11 @@ jobs:
 
       # The homelab image has no Node, and pnpm's installer needs one, so Node
       # comes first. Its pnpm cache is off because setup-node would need pnpm
-      # before pnpm/action-setup has installed it.
+      # before pnpm/action-setup has installed it. lts/* follows the active LTS
+      # release (24 now, 26 from 2026-10-28).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: lts/*
 
       # pnpm reads its version from the packageManager field in package.json.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6

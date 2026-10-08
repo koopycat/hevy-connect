@@ -6,6 +6,12 @@
       "description": "typescript-eslint 8.x supports TypeScript >=4.8.4 <6.1.0 and fails ESLint on TS 7 (tracking issue typescript-eslint#10940). Remove this rule once the installed typescript-eslint supports the next TypeScript.",
       "matchPackageNames": ["typescript"],
       "allowedVersions": "<6.1.0"
+    },
+    {
+      "description": "engines.node is the oldest Node release the CLI supports, set by hand to the oldest LTS in use. Renovate would raise it to the newest Node 24 patch and drop support for older releases.",
+      "matchDepTypes": ["engines"],
+      "matchPackageNames": ["node"],
+      "enabled": false
     }
   ]
 }
