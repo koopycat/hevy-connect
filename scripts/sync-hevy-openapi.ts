@@ -25,6 +25,9 @@ import {
 
 export const SOURCE_URL = "https://api.hevyapp.com/docs/swagger-ui-init.js";
 const FETCH_TIMEOUT_MS = 20_000;
+// The live script is about 90 KB today. The cap stops a runaway response from
+// exhausting memory before the job timeout would.
+const MAX_SCRIPT_BYTES = 4 * 1024 * 1024;
 const MARKER = '"swaggerDoc": ';
 
 type SpecObject = {
@@ -85,7 +88,25 @@ async function fetchLiveScript(): Promise<string> {
       `Fetching ${SOURCE_URL} failed with HTTP ${response.status}.`,
     );
   }
-  return response.text();
+  if (response.body === null) {
+    throw new Error(`Fetching ${SOURCE_URL} returned no body.`);
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_SCRIPT_BYTES) {
+      await reader.cancel();
+      throw new Error(
+        `The live Swagger UI script exceeds ${MAX_SCRIPT_BYTES} bytes; refusing to read it.`,
+      );
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
 /** Human-readable summary of how the contract changed. */
