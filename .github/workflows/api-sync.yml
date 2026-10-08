@@ -52,8 +52,8 @@ jobs:
   # from the default branch, on the output of the refresh job.
   publish:
     needs: refresh
-    # Pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19, and this job holds
-    # the write token.
+    # Pinned to one image instead of ubuntu-latest, so an image change never
+    # reaches this write-token job unreviewed. Renovate proposes the bumps.
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:

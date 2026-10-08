@@ -38,7 +38,7 @@ async function invoke(argv: readonly string[]): Promise<Invocation> {
   }
 }
 
-describe.sequential("CLI runtime dispatch", () => {
+describe("CLI runtime dispatch", { concurrent: false }, () => {
   let originalCwd: string;
   let originalExitCode: typeof process.exitCode;
   let originalEnvironment: Record<string, string | undefined>;
