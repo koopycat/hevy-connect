@@ -15,9 +15,10 @@ concurrency:
 
 jobs:
   # Runs project code (pnpm install, pnpm check) and reads third-party data. It
-  # holds no write credential, and its checkout does not persist one.
+  # holds no write credential, and its checkout does not persist one. It runs on
+  # the homelab runners (SYS-ci-runner): disposable VM, internet only.
   refresh:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, homelab]
     timeout-minutes: 15
     permissions:
       contents: read
