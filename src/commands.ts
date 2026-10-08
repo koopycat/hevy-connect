@@ -1076,7 +1076,7 @@ async function checkExerciseTitleUnique(
   const wanted = normalizeExerciseTitle(title);
   const matchIds: string[] = [];
   let page = 1;
-  let pageCount = 1;
+  let pageCount: number;
   let scanned = 0;
   do {
     if (page > MAX_AUTO_PAGES) {
