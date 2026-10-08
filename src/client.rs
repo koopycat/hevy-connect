@@ -88,6 +88,9 @@ impl Client {
             .max_redirects(0)
             .max_redirects_will_error(false)
             .http_status_as_error(false)
+            // The key goes to the configured base URL only, never via a proxy
+            // that the environment happens to name.
+            .proxy(None)
             .user_agent(concat!("hevy-axi/", env!("CARGO_PKG_VERSION")))
             .build()
             .into();
@@ -236,7 +239,7 @@ impl Client {
             };
         }
 
-        let error = self.http_error(status, body, truncated);
+        let error = self.http_error(method, status, body, truncated);
         if matches!(status, 429 | 502 | 503 | 504) {
             Err(Failure::Transient { error, retry_after })
         } else {
@@ -244,7 +247,13 @@ impl Client {
         }
     }
 
-    fn http_error(&self, status: u16, body: Option<Value>, truncated: bool) -> Error {
+    fn http_error(
+        &self,
+        method: Method,
+        status: u16,
+        body: Option<Value>,
+        truncated: bool,
+    ) -> Error {
         let body = body.map(|body| redact(body, &self.api_key));
         let mut details = Map::from_iter([("status".to_owned(), status.into())]);
         if let Some(body) = &body {
@@ -267,6 +276,10 @@ impl Client {
         };
         let mut error = Error::new(code, message).with_details(Value::Object(details));
         error.suggestions = suggestions.iter().map(|s| (*s).to_owned()).collect();
+        if status >= 500 {
+            // A server or gateway failure says nothing about whether a write landed.
+            error.suggestions.extend(mutation_suggestions(method));
+        }
         error
     }
 
@@ -287,7 +300,12 @@ impl Client {
     }
 
     fn read_failure(&self, method: Method, error: &io::Error) -> Failure {
-        if error.kind() == io::ErrorKind::TimedOut {
+        // ureq reports a stalled body as its own timeout wrapped in an `io::Error`.
+        let wrapped_timeout = error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<ureq::Error>())
+            .is_some_and(|inner| matches!(inner, ureq::Error::Timeout(_)));
+        if wrapped_timeout || error.kind() == io::ErrorKind::TimedOut {
             return Failure::Fatal(self.timeout_error(method));
         }
         let mut network = Error::new(Code::Network, "The Hevy API request failed.");
@@ -513,7 +531,7 @@ mod tests {
             ..ClientOptions::default()
         };
         for (is_write, expect_advice) in [(false, false), (true, true)] {
-            let (url, server) = slow_server(Duration::from_millis(700));
+            let (url, server) = slow_server(Duration::from_millis(1600));
             let client = Client::new("k", BaseUrl::parse(&url).unwrap(), options.clone());
             let started = std::time::Instant::now();
             let error = if is_write {
@@ -525,10 +543,56 @@ mod tests {
             assert_eq!(error.details, Some(json!({ "timeoutMs": 150 })));
             assert_eq!(!error.suggestions.is_empty(), expect_advice);
             assert!(
-                started.elapsed() < Duration::from_millis(600),
+                started.elapsed() < Duration::from_millis(1400),
                 "a timeout is final, not retried"
             );
             server.join().unwrap();
         }
+    }
+
+    #[test]
+    fn a_body_that_stalls_midway_is_a_timeout_and_is_not_retried() {
+        for framing in ["Content-Length: 100", "Transfer-Encoding: chunked"] {
+            stalled_body_times_out(framing);
+        }
+    }
+
+    fn stalled_body_times_out(framing: &'static str) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            assert!(
+                stream.read(&mut request).unwrap() > 0,
+                "the client sent a request"
+            );
+            let head =
+                format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n{framing}\r\n\r\n");
+            stream.write_all(head.as_bytes()).unwrap();
+            stream
+                .write_all(if framing.contains("chunked") {
+                    b"1\r\n{\r\n"
+                } else {
+                    b"{"
+                })
+                .unwrap();
+            // Hold the connection open until the client gives up and hangs up.
+            while stream.read(&mut request).unwrap_or(0) > 0 {}
+        });
+        let options = ClientOptions {
+            timeout: Duration::from_millis(1500),
+            ..ClientOptions::default()
+        };
+        let client = Client::new("k", BaseUrl::parse(&url).unwrap(), options);
+        let started = std::time::Instant::now();
+        let error = client.get("/v1/workouts", &[]).unwrap_err();
+        assert_eq!(error.code, Code::Timeout);
+        assert!(
+            started.elapsed() < Duration::from_millis(2800),
+            "a timeout is final, not retried"
+        );
+        server.join().unwrap();
     }
 }

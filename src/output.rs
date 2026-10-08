@@ -10,7 +10,6 @@ use crate::error::{Error, Result};
 
 const STRING_LIMIT: usize = 240;
 const ARRAY_LIMIT: usize = 50;
-const UNSAFE_PATH_SEGMENTS: [&str; 3] = ["__proto__", "prototype", "constructor"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -113,7 +112,6 @@ fn parse_fields(text: &str) -> Result<Vec<String>> {
     for field in fields {
         let safe = field.split('.').all(|segment| {
             !segment.is_empty()
-                && !UNSAFE_PATH_SEGMENTS.contains(&segment)
                 && segment
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
@@ -358,15 +356,7 @@ mod tests {
     #[test]
     fn fields_are_trimmed_deduplicated_and_checked() {
         assert_eq!(parse_fields(" a , b.c,a").unwrap(), ["a", "b.c"]);
-        for bad in [
-            "",
-            "a,,b",
-            "a..b",
-            "__proto__",
-            "a.constructor",
-            "a b",
-            "a/b",
-        ] {
+        for bad in ["", "a,,b", "a..b", "a b", "a/b"] {
             assert!(parse_fields(bad).is_err(), "{bad:?}");
         }
     }

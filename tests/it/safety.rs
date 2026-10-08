@@ -2,6 +2,7 @@
 //! only reads are retried, mutations are gated, and local files are handled
 //! defensively.
 
+use std::ffi::OsString;
 use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 
@@ -1069,4 +1070,38 @@ fn measurement_bodies_reject_unknown_and_non_numeric_fields() {
             output.stdout
         );
     }
+}
+
+#[test]
+fn non_utf8_environment_and_arguments_never_panic() {
+    use std::os::unix::ffi::OsStringExt;
+    let cli = Cli::new().without_key();
+    let bad_env = [(OsString::from("BAD"), OsString::from_vec(vec![0xff, 0xfe]))];
+    for flag in ["--version", "--help"] {
+        let output = cli.execute(&[OsString::from(flag)], &bad_env, "");
+        assert_eq!(output.code, 0, "{flag}: {}", output.stdout);
+    }
+    let bad_arg = cli.execute(&[OsString::from_vec(b"workout\xff".to_vec())], &[], "");
+    assert_eq!(bad_arg.code, 2);
+    assert!(
+        bad_arg.stdout.contains("VALIDATION_ERROR"),
+        "{}",
+        bad_arg.stdout
+    );
+}
+
+#[test]
+fn proxy_variables_in_the_environment_are_ignored() {
+    let proxy = Mock::start(|_| Reply::json(200, &json!({ "data": {} })));
+    let mock = Mock::start(|_| Reply::json(200, &json!({ "data": {} })));
+    let cli = Cli::against(&mock)
+        .with_env("HTTP_PROXY", &proxy.url)
+        .with_env("ALL_PROXY", &proxy.url);
+    let output = cli.run(&["user", "info", "--json"]);
+    assert_eq!(output.code, 0, "{}", output.stdout);
+    assert_eq!(mock.requests().len(), 1);
+    assert!(
+        proxy.requests().is_empty(),
+        "the API key never goes through an ambient proxy"
+    );
 }

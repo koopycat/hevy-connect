@@ -13,6 +13,7 @@ use toml_edit::{DocumentMut, value};
 
 use crate::config::Environment;
 use crate::error::{Error, Result};
+use crate::output::shell_argument;
 
 const MARKER: &str = "hevy-axi";
 const TIMEOUT_SECONDS: u64 = 10;
@@ -52,10 +53,25 @@ fn failed(path: &Path, what: &str) -> Error {
     )
 }
 
+/// Whether a hook command runs this tool: its bare name or a path ending in
+/// it (optionally shell-quoted), with no arguments. A command that merely
+/// contains the name, such as `hevy-axi-notes-sync.sh`, belongs to someone else.
+fn runs_this_tool(command: &str) -> bool {
+    let program = command.trim();
+    let program = program
+        .strip_prefix('\'')
+        .and_then(|quoted| quoted.strip_suffix('\''))
+        .unwrap_or(program);
+    // `hevy-axi.js` is what the TypeScript version installed.
+    Path::new(program)
+        .file_name()
+        .is_some_and(|name| name == MARKER || name == "hevy-axi.js")
+}
+
 fn is_managed(hook: &Value) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
-        .is_some_and(|command| command.contains(MARKER))
+        .is_some_and(runs_this_tool)
 }
 
 fn managed_hook_groups(settings: &Value) -> impl Iterator<Item = &Value> {
@@ -69,6 +85,12 @@ fn managed_hook_groups(settings: &Value) -> impl Iterator<Item = &Value> {
 /// Write `contents` so a crash never leaves a partial file. A replaced file
 /// keeps its permissions; a new one gets the usual `0666 & ~umask`.
 fn write_atomically(path: &Path, contents: &str) -> io::Result<()> {
+    // Write through a symbolic link (a dotfiles setup) rather than replacing it.
+    let resolved = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path)?,
+        _ => path.to_path_buf(),
+    };
+    let path = resolved.as_path();
     let directory = path.parent().expect("hook targets have a parent");
     fs::create_dir_all(directory)?;
     let mut file = tempfile::Builder::new()
@@ -258,9 +280,11 @@ fn hook_command(exe: &Path, path_variable: Option<&str>) -> String {
 pub fn install(env: &Environment, exe: &Path) -> Result<()> {
     let targets = Targets::of(&env.home);
     let command = hook_command(exe, env.path_variable());
+    // OpenCode spawns the command directly; Claude Code and Codex run it in a shell.
+    let shell_command = shell_argument(&command);
     install_plugin(&targets.opencode_plugin, &command)?;
-    install_json_hook(&targets.claude_settings, &command)?;
-    install_json_hook(&targets.codex_hooks, &command)?;
+    install_json_hook(&targets.claude_settings, &shell_command)?;
+    install_json_hook(&targets.codex_hooks, &shell_command)?;
     enable_codex_hooks(&targets.codex_config)
 }
 
@@ -467,5 +491,91 @@ mod tests {
             "hevy-axi",
             "a symlink to this executable counts"
         );
+    }
+
+    #[test]
+    fn hooks_of_other_tools_whose_names_merely_contain_ours_are_never_touched() {
+        let home = tempfile::tempdir().unwrap();
+        let env = env(home.path());
+        let settings = home.path().join(".claude/settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let theirs = json!({"hooks": {"SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "~/bin/hevy-axi-notes-sync.sh"}]}]}});
+        fs::write(&settings, theirs.to_string()).unwrap();
+
+        install(&env, Path::new("/opt/bin/hevy-axi")).unwrap();
+        let installed: Value =
+            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let commands: Vec<&str> = managed_commands(&installed);
+        assert_eq!(
+            commands,
+            ["~/bin/hevy-axi-notes-sync.sh", "/opt/bin/hevy-axi"]
+        );
+        assert!(status(&env).claude);
+
+        uninstall(&env).unwrap();
+        let after: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(after, theirs, "their hook survives install and uninstall");
+    }
+
+    fn managed_commands(settings: &Value) -> Vec<&str> {
+        settings["hooks"]["SessionStart"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap())
+            .map(|hook| hook["command"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_symlinked_config_file_stays_a_symlink_and_its_target_is_updated() {
+        let home = tempfile::tempdir().unwrap();
+        let env = env(home.path());
+        let dotfiles = tempfile::tempdir().unwrap();
+        let target = dotfiles.path().join("settings.json");
+        fs::write(&target, "{\"theme\": \"dark\"}\n").unwrap();
+        let link = home.path().join(".claude/settings.json");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        install(&env, Path::new("/opt/bin/hevy-axi")).unwrap();
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let written: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+        assert_eq!(written["theme"], "dark");
+        assert!(managed_commands(&written).contains(&"/opt/bin/hevy-axi"));
+    }
+
+    #[test]
+    fn a_path_with_spaces_is_quoted_for_the_shell_but_not_for_the_plugin() {
+        let home = tempfile::tempdir().unwrap();
+        let env = env(home.path());
+        let exe = Path::new("/opt/my tools/hevy-axi");
+        install(&env, exe).unwrap();
+        let settings: Value = serde_json::from_str(
+            &fs::read_to_string(home.path().join(".claude/settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(managed_commands(&settings), ["'/opt/my tools/hevy-axi'"]);
+        assert!(
+            status(&env).claude,
+            "a quoted command is still recognised as ours"
+        );
+        let plugin = fs::read_to_string(
+            home.path()
+                .join(".config/opencode/plugins")
+                .join(PLUGIN_NAME),
+        )
+        .unwrap();
+        assert!(
+            plugin.contains("const command = \"/opt/my tools/hevy-axi\";"),
+            "spawned without a shell, so unquoted"
+        );
+        uninstall(&env).unwrap();
+        assert!(!status(&env).claude);
     }
 }

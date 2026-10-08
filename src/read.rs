@@ -5,7 +5,7 @@ use serde_json::{Map, Value, json};
 use crate::client::Client;
 use crate::compact::Kind;
 use crate::error::{Error, Result};
-use crate::output::{OutputOptions, project_fields};
+use crate::output::{OutputOptions, project_fields, shell_argument};
 use crate::resource::Spec;
 use crate::wire::{array, object, safe_integer};
 
@@ -89,10 +89,17 @@ fn detail_help(spec: &Spec, kind: Kind, compact: &Value) -> Vec<String> {
         "id"
     };
     let mut help = vec![format!("hevy-axi {} list", spec.name)];
-    match compact.get(key) {
-        Some(Value::String(id)) => help.push(format!("hevy-axi {} view {id} --full", spec.name)),
-        Some(Value::Number(id)) => help.push(format!("hevy-axi {} view {id} --full", spec.name)),
-        _ => {}
+    let id = match compact.get(key) {
+        Some(Value::String(id)) => Some(id.clone()),
+        Some(Value::Number(id)) => Some(id.to_string()),
+        _ => None,
+    };
+    if let Some(id) = id {
+        help.push(format!(
+            "hevy-axi {} view {} --full",
+            spec.name,
+            shell_argument(&id)
+        ));
     }
     help
 }
@@ -119,21 +126,7 @@ pub fn history(
         return Ok(options.render(wire));
     }
 
-    let compact = entries
-        .iter()
-        .map(|entry| Kind::History.compact(entry, false))
-        .collect::<Result<Vec<_>>>()?;
-    let default_fields: Vec<String> = Kind::History
-        .default_fields()
-        .iter()
-        .map(|f| (*f).to_owned())
-        .collect();
-    let fields = options.fields.as_deref().unwrap_or(&default_fields);
-    let selected = project_fields(
-        &Value::Array(compact),
-        fields,
-        Some(&Kind::History.available_fields()),
-    )?;
+    let selected = Kind::History.rows(entries, options.fields.as_deref())?;
     let results: Vec<Value> = selected
         .as_array()
         .into_iter()
@@ -143,6 +136,7 @@ pub fn history(
         .collect();
     let omitted = entries.len() - results.len();
 
+    let id = shell_argument(id);
     let mut help = vec![format!("hevy-axi exercise view {id}")];
     if omitted > 0 {
         help.push(format!("hevy-axi exercise history {id} --full"));
