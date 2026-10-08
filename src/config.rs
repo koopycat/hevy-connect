@@ -34,7 +34,12 @@ impl Environment {
     pub fn from_process() -> io::Result<Self> {
         let cwd = std::env::current_dir()?;
         let home = std::env::home_dir().ok_or_else(|| io::Error::other("no home directory"))?;
-        Ok(Self::new(cwd, home, std::env::vars()))
+        // Variables that are not valid UTF-8 cannot be ours, so they are skipped
+        // instead of aborting the process.
+        let vars = std::env::vars_os().filter_map(|(name, value)| {
+            Some((name.into_string().ok()?, value.into_string().ok()?))
+        });
+        Ok(Self::new(cwd, home, vars))
     }
 
     pub fn new(
@@ -157,7 +162,11 @@ static ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
 fn dotenv_value(raw: &str) -> Option<String> {
     let value = raw.trim();
     let Some(quote) = value.chars().next().filter(|c| matches!(c, '"' | '\'')) else {
-        let end = value.find('#').unwrap_or(value.len());
+        // `#` starts a comment only after whitespace, so `abc#def` stays whole.
+        let end = value
+            .match_indices('#')
+            .find(|(index, _)| value[..*index].ends_with(char::is_whitespace))
+            .map_or(value.len(), |(index, _)| index);
         return Some(value[..end].trim().to_owned());
     };
 
@@ -501,6 +510,8 @@ mod tests {
         for (raw, want) in [
             ("abc", Some("abc")),
             ("  abc  # note", Some("abc")),
+            ("abc#def", Some("abc#def")),
+            ("abc\t#c", Some("abc")),
             ("", Some("")),
             ("\"a b\"", Some("a b")),
             ("\"a\\\"b\\n\\\\\"  # c", Some("a\"b\n\\")),

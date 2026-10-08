@@ -2,6 +2,7 @@
 //! in a private home and project directory.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -197,6 +198,17 @@ impl Cli {
     }
 
     pub fn run_with_stdin(&self, args: &[&str], stdin: &str) -> Output {
+        let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+        self.execute(&args, &[], stdin)
+    }
+
+    /// Run with arguments and extra environment that need not be UTF-8.
+    pub fn execute(
+        &self,
+        args: &[OsString],
+        extra_env: &[(OsString, OsString)],
+        stdin: &str,
+    ) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_hevy-axi"));
         command
             .args(args)
@@ -205,6 +217,7 @@ impl Cli {
             .env("HOME", self.home())
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .envs(self.env.iter().map(|(k, v)| (k, v)))
+            .envs(extra_env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

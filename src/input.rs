@@ -20,7 +20,14 @@ pub fn read_stdin() -> Result<String> {
     if more {
         return Err(too_large());
     }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    utf8(bytes)
+}
+
+/// Mutation input is sent to Hevy, so invalid bytes must fail instead of
+/// being silently replaced.
+fn utf8(bytes: Vec<u8>) -> Result<String> {
+    String::from_utf8(bytes)
+        .map_err(|_| Error::validation("The mutation input must be valid UTF-8."))
 }
 
 fn read_file(path: &Path) -> Result<String> {
@@ -49,7 +56,7 @@ fn read_file(path: &Path) -> Result<String> {
     if more {
         return Err(too_large());
     }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    utf8(bytes)
 }
 
 /// The JSON object in `source`: a path (relative to `cwd`) or `-` for stdin.
@@ -123,5 +130,15 @@ mod tests {
         let regular = "The mutation input must be a regular, non-symbolic-link file.";
         assert_eq!(message(read_json_object("link.json", dir.path())), regular);
         assert_eq!(message(read_json_object("folder", dir.path())), regular);
+    }
+
+    #[test]
+    fn invalid_utf8_is_refused_rather_than_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("latin1.json"), b"{\"title\":\"caf\xe9\"}").unwrap();
+        assert_eq!(
+            message(read_json_object("latin1.json", dir.path())),
+            "The mutation input must be valid UTF-8."
+        );
     }
 }

@@ -166,6 +166,8 @@ hevy-axi setup remove-hooks --confirm
 
 `HEVY_API_BASE_URL` is never discovered from Swagger or a response. Set it only to an endpoint you explicitly trust, because the API key is sent there. It must be HTTPS, contain no user information, query, or fragment, and trailing slashes are removed. Plain HTTP is accepted only for loopback test servers. The same variable can be placed in a supported environment file, but an environment value has highest precedence.
 
+TLS certificates are checked against a built-in set of public roots, not the system trust store, so a TLS-intercepting corporate proxy is not supported. Proxy environment variables (`HTTPS_PROXY`, `ALL_PROXY`, ...) are ignored on purpose: the API key is only ever sent directly to the base URL.
+
 ## Development
 
 ```bash

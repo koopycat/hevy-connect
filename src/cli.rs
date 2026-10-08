@@ -27,6 +27,16 @@ pub struct Outcome {
     pub code: u8,
 }
 
+impl Outcome {
+    /// A failure that happened before any command could run.
+    pub fn error(error: &Error) -> Self {
+        Self {
+            text: render_error(error, Format::Toon),
+            code: error.exit_code(),
+        }
+    }
+}
+
 /// Run one invocation. Results and errors alike are printed on stdout,
 /// rendered in the format the arguments asked for.
 pub fn run(argv: &[String], env: &Environment, exe: &Path) -> Outcome {

@@ -19,20 +19,28 @@ mod setup;
 mod time;
 mod wire;
 
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-/// Run the CLI for `argv` (without the program name) against the real process
+/// Run the CLI for `args` (without the program name) against the real process
 /// environment, printing to stdout.
-pub fn main(argv: &[String]) -> ExitCode {
-    let outcome = match (config::Environment::from_process(), std::env::current_exe()) {
-        (Ok(env), Ok(exe)) => cli::run(argv, &env, &exe),
-        _ => cli::Outcome {
-            text:
-                "The working directory, home directory, or executable path could not be determined."
-                    .to_owned(),
-            code: 1,
-        },
+pub fn run(args: impl IntoIterator<Item = OsString>) -> ExitCode {
+    let outcome = match (
+        args.into_iter()
+            .map(OsString::into_string)
+            .collect::<Result<Vec<_>, _>>(),
+        config::Environment::from_process(),
+        std::env::current_exe(),
+    ) {
+        (Ok(argv), Ok(env), Ok(exe)) => cli::run(&argv, &env, &exe),
+        (Err(_), ..) => {
+            cli::Outcome::error(&error::Error::validation("Arguments must be valid UTF-8."))
+        }
+        _ => cli::Outcome::error(&error::Error::new(
+            error::Code::Config,
+            "The working directory, home directory, or executable path could not be determined.",
+        )),
     };
     // A closed pipe (`hevy-axi ... | head`) is a normal way for a reader to stop.
     match writeln!(io::stdout().lock(), "{}", outcome.text) {

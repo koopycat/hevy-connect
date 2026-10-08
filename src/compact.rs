@@ -5,6 +5,7 @@
 use serde_json::{Map, Value};
 
 use crate::error::Result;
+use crate::output::project_fields;
 use crate::time::parse_timestamp;
 use crate::wire::{array_len, number, object, scalar, string};
 
@@ -101,6 +102,26 @@ impl Kind {
             Self::Measurement => &["date", "weightKg", "fatPercent", "waist"],
             Self::Event => &["type", "id", "time", "title"],
         }
+    }
+
+    /// Compact every wire record and keep the fields asked for with `--fields`,
+    /// or this kind's default fields. The result is an array of rows.
+    pub fn rows(self, wire: &[Value], fields: Option<&[String]>) -> Result<Value> {
+        let compact = wire
+            .iter()
+            .map(|record| self.compact(record, false))
+            .collect::<Result<Vec<_>>>()?;
+        let defaults: Vec<String> = self
+            .default_fields()
+            .iter()
+            .map(|field| (*field).to_owned())
+            .collect();
+        let fields = fields.unwrap_or(&defaults);
+        project_fields(
+            &Value::Array(compact),
+            fields,
+            Some(&self.available_fields()),
+        )
     }
 
     /// Compact one wire record. `detail` adds the nested sets of a workout or routine.

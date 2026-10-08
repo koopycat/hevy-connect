@@ -7,7 +7,7 @@ use crate::client::Client;
 use crate::compact::Kind;
 use crate::config::Environment;
 use crate::error::{Error, Result};
-use crate::output::{OutputOptions, project_fields, shell_argument};
+use crate::output::{OutputOptions, shell_argument};
 use crate::resource::Spec;
 use crate::wire::{array, object, safe_integer};
 
@@ -227,22 +227,7 @@ pub fn list(
         return Ok(Value::Object(output));
     }
 
-    let compact = items
-        .iter()
-        .map(|item| spec.kind.compact(item, false))
-        .collect::<Result<Vec<_>>>()?;
-    let default_fields: Vec<String> = spec
-        .kind
-        .default_fields()
-        .iter()
-        .map(|f| (*f).to_owned())
-        .collect();
-    let fields = options.fields.as_deref().unwrap_or(&default_fields);
-    let results = project_fields(
-        &Value::Array(compact),
-        fields,
-        Some(&spec.kind.available_fields()),
-    )?;
+    let results = spec.kind.rows(&items, options.fields.as_deref())?;
     output.insert("results".into(), results);
 
     if paging.all && current >= page_count {
