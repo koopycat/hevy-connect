@@ -1,0 +1,5 @@
+# Custom runner labels used by this repository. The homelab runners are described in
+# infra SYS-ci-runner.
+self-hosted-runner:
+  labels:
+    - homelab
