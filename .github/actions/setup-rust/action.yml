@@ -4,12 +4,15 @@ description: C toolchain, Rust toolchain and just, for the homelab runners.
 runs:
   using: composite
   steps:
-    # The homelab image has no C compiler, which linking and the ring crate
-    # need. Jobs may sudo there (infra: SYS-ci-runner); a no-op where installed.
+    # Linking and the ring crate need a C compiler. The homelab runner image
+    # carries one (infra: SYS-ci-runner); install it only where it is missing.
+    # Jobs may sudo there.
     - shell: bash
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq --no-install-recommends build-essential
+        if ! command -v cc >/dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential
+        fi
 
     # The version matches rust-version in Cargo.toml.
     - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
