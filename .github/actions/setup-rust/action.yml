@@ -14,7 +14,7 @@ runs:
     # The version matches rust-version in Cargo.toml.
     - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
       with:
-        toolchain: "1.96"
+        toolchain: "1.99"
         components: clippy, rustfmt
 
     - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
