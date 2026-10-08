@@ -45,7 +45,7 @@ New capture SHA-256: \`$sha\`
 
 ## Checks
 
-\`pnpm check\` (the same suite as \`just check\`) **$check_result** on this branch.
+\`just check\` **$check_result** on this branch.
 
 ## Before merging
 

@@ -18,22 +18,20 @@ jobs:
   check:
     # The homelab runners (SYS-ci-runner): disposable VM, internet only.
     runs-on: [self-hosted, linux, x64, homelab]
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      # The homelab image has no Node, and pnpm's installer needs one, so Node
-      # comes first.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      # The homelab image has no Rust toolchain. The version matches
+      # rust-version in Cargo.toml.
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
-          node-version: 24
+          toolchain: "1.96"
+          components: clippy, rustfmt
 
-      # pnpm reads its version from the packageManager field in package.json.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
-      - run: pnpm install --frozen-lockfile
-
-      # Lint, format, generated-types drift, typecheck, tests, build.
-      - run: pnpm check
+      # Format, Clippy with warnings denied, tests, release build.
+      - run: just check
