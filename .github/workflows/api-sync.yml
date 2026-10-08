@@ -27,13 +27,15 @@ jobs:
         with:
           persist-credentials: false
 
-      # pnpm reads its version from the packageManager field in package.json.
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-
+      # The homelab image has no Node, and pnpm's installer needs one, so Node
+      # comes first. Its pnpm cache is off because setup-node would need pnpm
+      # before pnpm/action-setup has installed it.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
+
+      # pnpm reads its version from the packageManager field in package.json.
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - run: pnpm install --frozen-lockfile
 
