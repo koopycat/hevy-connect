@@ -36,10 +36,10 @@
     "axi-sdk-js": "^0.1.13"
   },
   "devDependencies": {
-    "@eslint/js": "^9.38.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.7.2",
     "@vitest/coverage-v8": "^5.0.0",
-    "eslint": "^9.38.0",
+    "eslint": "^10.10.0",
     "openapi-typescript": "7.13.0",
     "prettier": "^3.6.2",
     "tsx": "^4.20.6",
