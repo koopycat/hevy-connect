@@ -1,0 +1,22 @@
+Usage: hevy-axi workout <action> [arguments] [flags]
+
+Actions:
+  list                List workouts
+  count               Return the exact workout count
+  events              List workout update/delete events
+  view <id>           View one workout with each exercise's sets
+  create              Create a workout from JSON
+  update <id>         Fully replace a workout from JSON (all fields required)
+
+{{PAGINATION}}
+  --since <ISO>        Events since an ISO-8601 timestamp (events only)
+{{COMMON}}
+{{MUTATION}}
+
+Examples:
+  hevy-axi workout list --page-size 10
+  hevy-axi workout list --all --limit 100 --json
+  hevy-axi workout events --since 2024-01-01T00:00:00Z
+  hevy-axi workout view <id> --full
+  hevy-axi workout create --file workout.json --dry-run
+  hevy-axi workout update <id> --file - --confirm

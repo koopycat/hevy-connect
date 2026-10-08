@@ -1,0 +1,5 @@
+Pagination flags:
+  --page <n>           Fetch page n
+  --page-size <n>      Items per API page
+  --limit <n>          Return at most n items; resume marks a cut page
+  --all                Fetch all pages (max 500 pages / 5000 items)

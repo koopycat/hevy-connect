@@ -45,8 +45,7 @@ else
 fi
 
 cp "$IN/hevy-openapi.json" docs/hevy-openapi.json
-cp "$IN/hevy-api.ts" src/generated/hevy-api.ts
-git add docs/hevy-openapi.json src/generated/hevy-api.ts
+git add docs/hevy-openapi.json
 if ! git diff --cached --quiet; then
   git commit -q -m "$TITLE"
 fi

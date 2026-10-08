@@ -1,0 +1,17 @@
+Usage: hevy-axi routine <action> [arguments] [flags]
+
+Actions:
+  list                List routines
+  view <id>           View one routine with each exercise's planned sets
+  create              Create a routine from JSON
+  update <id>         Fully replace a routine from JSON (all fields required)
+
+{{PAGINATION}}
+{{COMMON}}
+{{MUTATION}}
+
+Examples:
+  hevy-axi routine list --all
+  hevy-axi routine view <id>
+  hevy-axi routine create --file routine.json --confirm
+  hevy-axi routine update <id> --file - --dry-run --full
