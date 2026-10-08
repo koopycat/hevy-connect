@@ -93,11 +93,13 @@ Actions:
   list                List exercise templates (page size 10, or 100 with --all)
   view <id>           View one exercise template
   history <id>        Show exercise set history (default output capped at 50)
-  create              Create a custom exercise template
+  create              Create a custom exercise template; refuses a title that already
+                      exists (built-in or custom) unless --allow-duplicate is given
 
 ${PAGINATION}
   --start <ISO>        History start timestamp
   --end <ISO>          History end timestamp
+  --allow-duplicate    Create even if an exercise with the same title exists
 ${COMMON}
 ${MUTATION}
 

@@ -32,6 +32,7 @@ import {
   type ResolvedConfig,
 } from "./config.js";
 import { HevyCliError, validationError } from "./errors.js";
+import type { components } from "./generated/hevy-api.js";
 import { commandHelp, TOP_LEVEL_HELP } from "./help.js";
 import {
   finalizeOutput,
@@ -88,25 +89,33 @@ const DEFAULT_COMPACT_FIELDS: Readonly<Record<CompactKind, readonly string[]>> =
     event: ["type", "id", "time", "title"],
     history: ["workoutId", "workoutStartTime", "weightKg", "reps"],
   };
-const MEASUREMENT_FIELDS = [
-  "weight_kg",
-  "lean_mass_kg",
-  "fat_percent",
-  "neck_cm",
-  "shoulder_cm",
-  "chest_cm",
-  "left_bicep_cm",
-  "right_bicep_cm",
-  "left_forearm_cm",
-  "right_forearm_cm",
-  "abdomen",
-  "waist",
-  "hips",
-  "left_thigh",
-  "right_thigh",
-  "left_calf",
-  "right_calf",
-] as const;
+type PutBodyMeasurement = components["schemas"]["PutBodyMeasurement"];
+
+// Typed against the generated schema, so a field missing from this list fails to
+// compile after the capture is regenerated. Against live drift, the runtime guard
+// is the unknown-field refusal in updateMeasurement.
+const MEASUREMENT_FIELD_KEYS: Record<keyof PutBodyMeasurement, true> = {
+  weight_kg: true,
+  lean_mass_kg: true,
+  fat_percent: true,
+  neck_cm: true,
+  shoulder_cm: true,
+  chest_cm: true,
+  left_bicep_cm: true,
+  right_bicep_cm: true,
+  left_forearm_cm: true,
+  right_forearm_cm: true,
+  abdomen: true,
+  waist: true,
+  hips: true,
+  left_thigh: true,
+  right_thigh: true,
+  left_calf: true,
+  right_calf: true,
+};
+const MEASUREMENT_FIELDS = Object.keys(
+  MEASUREMENT_FIELD_KEYS,
+) as (keyof PutBodyMeasurement)[];
 const MEASUREMENT_FIELD_SET = new Set<string>(MEASUREMENT_FIELDS);
 
 const USER_FIELDS = [
@@ -198,6 +207,9 @@ const MUTATION_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG, {
   confirm: { kind: "boolean" },
   "dry-run": { kind: "boolean" },
 });
+const EXERCISE_CREATE_FLAGS = combineFlags(MUTATION_FLAGS, {
+  "allow-duplicate": { kind: "boolean" },
+});
 const READ_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG);
 const SETUP_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG, {
   confirm: { kind: "boolean" },
@@ -205,6 +217,10 @@ const SETUP_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG, {
 const UPDATE_FLAGS = combineFlags(COMMON_OUTPUT_FLAGS, HELP_FLAG, {
   check: { kind: "boolean" },
 });
+
+function numberOrNull(value: JsonValue | undefined): number | null {
+  return typeof value === "number" ? value : null;
+}
 
 function objectValue(value: JsonValue, description: string): JsonObject {
   if (value === null || Array.isArray(value) || typeof value !== "object") {
@@ -1034,6 +1050,86 @@ function prepareBody(
   return body;
 }
 
+const EXERCISE_TITLE_SCAN_PAGE_SIZE = 100;
+
+function normalizeExerciseTitle(title: string): string {
+  return title.trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+/**
+ * Refuses to create an exercise whose title already exists, built-in or custom,
+ * unless the caller passes --allow-duplicate. Reads every template page. If the
+ * scan cannot finish within the pagination caps, it fails closed: nothing is
+ * created and the caller is told why.
+ */
+async function checkExerciseTitleUnique(
+  client: ClientLike,
+  body: JsonObject,
+  allowDuplicate: boolean,
+): Promise<JsonObject> {
+  const title = stringValue(
+    objectValue(body.exercise ?? null, "request").title,
+  );
+  if (title === null) {
+    throw validationError("Exercise title must be a non-empty string.");
+  }
+  const wanted = normalizeExerciseTitle(title);
+  const matchIds: string[] = [];
+  let page = 1;
+  let pageCount = 1;
+  let scanned = 0;
+  do {
+    if (page > MAX_AUTO_PAGES) {
+      throw validationError(
+        `Duplicate check exceeds the safety cap of ${MAX_AUTO_PAGES} pages. Nothing was created.`,
+      );
+    }
+    const wire = objectValue(
+      await client.get<JsonValue>("/v1/exercise_templates", {
+        query: { page, pageSize: EXERCISE_TITLE_SCAN_PAGE_SIZE },
+      }),
+      "exercise list response",
+    );
+    const templates = arrayValue(
+      wire.exercise_templates,
+      "exercise template array",
+    );
+    if (!Number.isSafeInteger(wire.page_count) || Number(wire.page_count) < 0) {
+      throw new HevyCliError(
+        "PROTOCOL_ERROR",
+        "Hevy returned invalid pagination metadata.",
+      );
+    }
+    pageCount = Number(wire.page_count);
+    scanned += templates.length;
+    if (scanned > MAX_AUTO_ITEMS) {
+      throw validationError(
+        `Duplicate check exceeds the safety cap of ${MAX_AUTO_ITEMS} exercise templates. Nothing was created.`,
+      );
+    }
+    for (const item of templates) {
+      const template = objectValue(item, "exercise template");
+      const existing = stringValue(template.title);
+      if (existing !== null && normalizeExerciseTitle(existing) === wanted) {
+        matchIds.push(stringValue(template.id) ?? "unknown");
+      }
+    }
+    page += 1;
+  } while (page <= pageCount);
+
+  if (matchIds.length > 0 && !allowDuplicate) {
+    throw validationError(
+      `An exercise titled "${title}" already exists (ID ${matchIds.join(", ")}). Nothing was created.`,
+      ["Pass --allow-duplicate to create it anyway."],
+    );
+  }
+  return {
+    performed: true,
+    matchesFound: matchIds.length,
+    overridden: matchIds.length > 0,
+  };
+}
+
 async function mutate(
   deps: CommandDependencies,
   parsed: ParsedArgs,
@@ -1064,6 +1160,7 @@ async function mutate(
   const options = commonOptions(parsed);
   const replacement = method === "PUT" && resource !== "measurement";
   const folderInsertion = resource === "folder" && method === "POST";
+  const checksTitle = resource === "exercise" && method === "POST";
   if (dryRun) {
     const preview: JsonObject = {
       dryRun: true,
@@ -1073,6 +1170,13 @@ async function mutate(
       ...(replacement ? { semantics: "full_replacement" } : {}),
       ...(folderInsertion
         ? { insertionIndex: 0, shiftsExistingFolders: true }
+        : {}),
+      // Dry-run stays offline, so the title check runs only on --confirm.
+      ...(checksTitle
+        ? {
+            duplicateCheck:
+              "runs on --confirm; refuses an existing title unless --allow-duplicate",
+          }
         : {}),
       bodySummary: {
         envelope:
@@ -1102,6 +1206,13 @@ async function mutate(
     );
   }
   const client = await configuredClient(deps);
+  const duplicateCheck = checksTitle
+    ? await checkExerciseTitleUnique(
+        client,
+        body,
+        booleanFlag(parsed, "allow-duplicate"),
+      )
+    : undefined;
   const response =
     method === "POST"
       ? await client.post<JsonValue>(path, { body })
@@ -1116,6 +1227,7 @@ async function mutate(
     ...(folderInsertion
       ? { insertionIndex: 0, shiftsExistingFolders: true }
       : {}),
+    ...(duplicateCheck === undefined ? {} : { duplicateCheck }),
     result: response === undefined ? null : response,
   };
   return formatResult(
@@ -1198,7 +1310,7 @@ async function updateMeasurement(
       "Hevy returned a body measurement for an unexpected date.",
     );
   }
-  const merged: JsonObject = {};
+  const merged: PutBodyMeasurement = {};
   for (const field of MEASUREMENT_FIELDS) {
     const currentValue = current[field];
     if (
@@ -1212,8 +1324,8 @@ async function updateMeasurement(
       );
     }
     merged[field] = Object.prototype.hasOwnProperty.call(patch, field)
-      ? (patch[field] ?? null)
-      : (currentValue ?? null);
+      ? numberOrNull(patch[field])
+      : numberOrNull(currentValue);
   }
   const changedFields = patchFields.filter(
     (field) => !Object.is(current[field], patch[field]),
@@ -1358,8 +1470,9 @@ function mutationArgs(
   command: string,
   action: string,
   idRequired: boolean,
+  flags: Readonly<Record<string, FlagDefinition>> = MUTATION_FLAGS,
 ): ParsedArgs | string {
-  const parsed = parseArgs(args, MUTATION_FLAGS);
+  const parsed = parseArgs(args, flags);
   if (booleanFlag(parsed, "help")) return helpResult(command);
   requirePositionalCount(
     parsed,
@@ -1733,7 +1846,13 @@ function exerciseHandler(
     });
   }
   if (action === "create") {
-    const parsed = mutationArgs(rest, "exercise", action, false);
+    const parsed = mutationArgs(
+      rest,
+      "exercise",
+      action,
+      false,
+      EXERCISE_CREATE_FLAGS,
+    );
     if (typeof parsed === "string") return Promise.resolve(parsed);
     return mutate(deps, parsed, "exercise", "POST", "/v1/exercise_templates");
   }

@@ -5,3 +5,5 @@ node_modules/
 pnpm-lock.yaml
 # Verbatim upstream capture; reformatting would break its checksum.
 docs/hevy-openapi.json
+# Generated from the Hevy OpenAPI capture by scripts/generate-api-types.ts.
+src/generated/

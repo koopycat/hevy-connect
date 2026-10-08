@@ -1145,12 +1145,18 @@ describe("mutation commands", () => {
         "--confirm",
       ];
       const result = objectResult(await h.commands[testCase.command](args));
-      expect(h.client.calls).toHaveLength(1);
-      expect(h.client.calls[0]).toEqual({
-        method: testCase.method,
-        path: testCase.path,
-        options: { body: testCase.body },
-      });
+      // Exercise create reads the template list once, before its single write.
+      const writes = h.client.calls.filter((call) => call.method !== "GET");
+      expect(writes).toEqual([
+        {
+          method: testCase.method,
+          path: testCase.path,
+          options: { body: testCase.body },
+        },
+      ]);
+      expect(h.client.calls).toHaveLength(
+        writes.length + (testCase.command === "exercise" ? 1 : 0),
+      );
       expect(result).toMatchObject({
         status: "success",
         method: testCase.method,
@@ -1165,6 +1171,149 @@ describe("mutation commands", () => {
       });
     },
   );
+
+  describe("exercise create duplicate check", () => {
+    function templatesResponder(
+      pages: Record<number, { titles: [string, string][]; pageCount: number }>,
+    ): Responder {
+      return (call) => {
+        if (call.method !== "GET") return { accepted: true };
+        const requested = Number(call.options?.query?.page ?? 1);
+        const current = pages[requested];
+        if (current === undefined) return page("exercise_templates", []);
+        return {
+          page: requested,
+          page_count: current.pageCount,
+          exercise_templates: current.titles.map(([id, title]) => ({
+            id,
+            title,
+            type: "weight_reps",
+            is_custom: false,
+          })),
+        };
+      };
+    }
+
+    function createFromStdin(
+      title: string,
+      responder: Responder,
+      extra: string[] = [],
+    ) {
+      const h = harness({
+        responder,
+        stdin: Readable.from([
+          JSON.stringify({
+            exercise: {
+              title,
+              exercise_type: "weight_reps",
+              equipment_category: "barbell",
+              muscle_group: "chest",
+              other_muscles: [],
+            },
+          }),
+        ]),
+      });
+      return {
+        h,
+        run: () => h.commands.exercise(["create", "--file", "-", ...extra]),
+      };
+    }
+
+    it("refuses an existing title, ignoring case and spacing, and sends no POST", async () => {
+      const { h, run } = createFromStdin(
+        "  BENCH   press ",
+        templatesResponder({
+          1: { titles: [["e-9", "Bench Press"]], pageCount: 1 },
+        }),
+        ["--confirm"],
+      );
+      await expect(run()).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("already exists (ID e-9)"),
+      });
+      expect(
+        h.client.calls.filter((call) => call.method === "POST"),
+      ).toHaveLength(0);
+    });
+
+    it("creates a duplicate title only with --allow-duplicate and reports the override", async () => {
+      const { h, run } = createFromStdin(
+        "Bench Press",
+        templatesResponder({
+          1: { titles: [["e-9", "Bench Press"]], pageCount: 1 },
+        }),
+        ["--confirm", "--allow-duplicate"],
+      );
+      const result = objectResult(await run());
+      expect(
+        h.client.calls.filter((call) => call.method === "POST"),
+      ).toHaveLength(1);
+      expect(result).toMatchObject({
+        status: "success",
+        duplicateCheck: { performed: true, matchesFound: 1, overridden: true },
+      });
+    });
+
+    it("scans every page before deciding, so a match on page two still refuses", async () => {
+      const { h, run } = createFromStdin(
+        "Custom Row",
+        templatesResponder({
+          1: { titles: [["e-1", "Squat"]], pageCount: 2 },
+          2: { titles: [["e-2", "custom row"]], pageCount: 2 },
+        }),
+        ["--confirm"],
+      );
+      await expect(run()).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+      const reads = h.client.calls.filter((call) => call.method === "GET");
+      expect(reads.map((call) => call.options?.query?.page)).toEqual([1, 2]);
+      expect(
+        h.client.calls.filter((call) => call.method === "POST"),
+      ).toHaveLength(0);
+    });
+
+    it("creates a new title and reports that no match was found", async () => {
+      const { h, run } = createFromStdin(
+        "Brand New Lift",
+        templatesResponder({ 1: { titles: [["e-1", "Squat"]], pageCount: 1 } }),
+        ["--confirm"],
+      );
+      const result = objectResult(await run());
+      expect(
+        h.client.calls.filter((call) => call.method === "POST"),
+      ).toHaveLength(1);
+      expect(result).toMatchObject({
+        duplicateCheck: { performed: true, matchesFound: 0, overridden: false },
+      });
+    });
+
+    it("runs offline on --dry-run, so no template list is read", async () => {
+      const { h, run } = createFromStdin(
+        "Bench Press",
+        templatesResponder({
+          1: { titles: [["e-9", "Bench Press"]], pageCount: 1 },
+        }),
+        ["--dry-run"],
+      );
+      const result = objectResult(await run());
+      expect(h.client.calls).toHaveLength(0);
+      expect(result).toMatchObject({
+        dryRun: true,
+        duplicateCheck: expect.stringContaining("--confirm"),
+      });
+    });
+
+    it("fails closed without a POST when the template list metadata is invalid", async () => {
+      const { h, run } = createFromStdin(
+        "Brand New Lift",
+        () => ({ page: 1, page_count: "many", exercise_templates: [] }),
+        ["--confirm"],
+      );
+      await expect(run()).rejects.toMatchObject({ code: "PROTOCOL_ERROR" });
+      expect(
+        h.client.calls.filter((call) => call.method === "POST"),
+      ).toHaveLength(0);
+    });
+  });
 
   it("requires --confirm before reading/sending and rejects confirm with dry-run", async () => {
     const h = harness();
