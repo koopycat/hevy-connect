@@ -28,7 +28,7 @@
     "check": "pnpm lint && pnpm format:check && pnpm api:types:check && pnpm typecheck && pnpm test && pnpm build"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.21.0"
   },
   "packageManager": "pnpm@12.9.1",
   "dependencies": {
