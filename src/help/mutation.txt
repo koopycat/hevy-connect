@@ -1,0 +1,5 @@
+Mutation flags:
+  --file <path|->      JSON object file, or - for stdin
+  --confirm            Required to send the mutation
+  --dry-run            Validate and preview without an API request
+  --full               Include the complete body/result

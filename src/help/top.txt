@@ -1,0 +1,16 @@
+hevy-axi — agent-friendly Hevy Public API CLI
+
+Usage:
+  hevy-axi <command> <action> [arguments] [flags]
+
+Commands:
+  user         info
+  workout      list, count, events, view, create, update
+  routine      list, view, create, update
+  exercise     list, view, history, create
+  folder       list, view, create
+  measurement  list, view, create, update
+  setup        status, key, remove-key, hooks, remove-hooks
+  update       Report the installed version and how to update it
+
+Run "hevy-axi <command> --help" for every action, flag, and example.

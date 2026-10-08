@@ -1,0 +1,5 @@
+Common output flags:
+  --format toon|json  Select output format (default: toon)
+  --json              Alias for --format json
+  --full              Return the complete wire payload
+  --fields <paths>    Project comma-separated dot paths

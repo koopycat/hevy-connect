@@ -1,0 +1,22 @@
+Usage: hevy-axi measurement <action> [arguments] [flags]
+
+Actions:
+  list                List body measurements
+  view <YYYY-MM-DD>   View measurements for a date
+  create              Create a date-keyed measurement
+  update <YYYY-MM-DD> Safely patch values by merging with the current measurement
+
+{{PAGINATION}}
+{{COMMON}}
+{{MUTATION}}
+
+Examples:
+  hevy-axi measurement list --all
+  hevy-axi measurement view 2024-08-14
+  hevy-axi measurement create --file measurement.json --confirm
+  hevy-axi measurement update 2024-08-14 --file - --dry-run
+
+Measurement updates accept only documented measurement keys with number|null
+values. Confirmed updates read the current date, merge the patch, reject unknown
+upstream fields, and PUT one complete replacement body without date. Dry-run
+performs no API request and reports strategy: merge_with_current.

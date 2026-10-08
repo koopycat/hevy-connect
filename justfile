@@ -1,38 +1,51 @@
-set shell := ["bash", "-cu"]
+# Canonical development and release tasks for hevy-axi.
 
-# Show available recipes
+# Show the available recipes.
 default:
     @just --list
 
-# Install locked dependencies
-install:
-    pnpm install --frozen-lockfile
-
-# Run the CLI from source
-run *ARGS:
-    pnpm exec tsx src/bin/hevy-axi.ts {{ARGS}}
-
-# Build the distributable CLI
+# Build the optimized single native binary at target/release/hevy-axi.
 build:
-    pnpm build
+    cargo build --locked --release
 
-# Regenerate Hevy API types from docs/hevy-openapi.json
-api-types:
-    pnpm api:types
+# Run the CLI from source.
+run *ARGS:
+    cargo run --locked --quiet -- {{ ARGS }}
 
-# Refresh the Hevy OpenAPI capture from the live docs and regenerate types
-api-sync:
-    pnpm api:sync
-
-# Run unit and integration tests
+# Run all unit and integration tests.
 test:
-    pnpm test
+    cargo test --locked --all-targets
 
-# Run lint, formatting, types, tests, and build
-check:
-    pnpm check
+# Run Clippy with warnings denied.
+lint:
+    cargo clippy --locked --all-targets -- -D warnings
 
-# Link the CLI into the active pnpm environment
-link:
-    pnpm build
-    pnpm add --global "{{justfile_directory()}}"
+# Format Rust and the justfile.
+format:
+    just --fmt
+    cargo fmt
+
+# Verify Rust and justfile formatting without changing files.
+format-check:
+    just --fmt --check
+    cargo fmt --check
+
+# Refresh the Hevy OpenAPI capture from the live docs (network).
+api-sync:
+    cargo run --locked --example api-sync
+
+# Report whether the committed capture differs from the live docs (network).
+api-sync-check:
+    cargo run --locked --example api-sync -- --check
+
+# Install the release binary in the user-local bin directory.
+install: build
+    mkdir -p "${HOME}/.local/bin"
+    install -m 0755 target/release/hevy-axi "${HOME}/.local/bin/hevy-axi"
+
+# Remove Cargo build artifacts.
+clean:
+    cargo clean
+
+# Run the complete local validation suite.
+check: format-check lint test build

@@ -1,0 +1,10 @@
+Usage: hevy-axi user info [flags]
+
+Actions:
+  info                Show authenticated account information
+
+{{COMMON}}
+
+Examples:
+  hevy-axi user info
+  hevy-axi user info --fields username,weight_unit --json

@@ -1,0 +1,12 @@
+Usage: hevy-axi update [--check] [flags]
+
+Report the installed version, the executable it runs from, and how to update
+it. The command never contacts the network or changes local files.
+
+Flags:
+  --check             Same read-only report; accepted for AXI compatibility
+  --help              Show this help
+{{COMMON}}
+
+To update, in your checkout of this repository:
+  git pull --ff-only && just install

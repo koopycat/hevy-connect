@@ -1,6 +1,6 @@
 # hevy-axi
 
-`hevy-axi` is a TypeScript CLI for all 22 operations in the Hevy Public API. It gives shell agents and humans compact, deterministic access to workouts, routines, exercise templates and history, routine folders, body measurements, and account metadata.
+`hevy-axi` is a single-binary CLI for all 22 operations in the Hevy Public API. It gives shell agents and humans compact, deterministic access to workouts, routines, exercise templates and history, routine folders, body measurements, and account metadata.
 
 The interface follows the [AXI principles](https://axi.md/): minimize schema and token overhead, return structured errors and explicit empty states, and include useful next commands. Output is [TOON](https://toonformat.dev/) by default because AXI recommends it as a token-efficient alternative to JSON; JSON remains available for conventional tooling.
 
@@ -10,29 +10,23 @@ Hevy describes its [Public API](https://api.hevyapp.com/docs/) as an early rollo
 
 ## Install and run
 
-Requirements: Node.js 20 or newer, pnpm 12, and `just`.
+`hevy-axi` is one self-contained native binary (macOS and Linux, about 2 MB) with no runtime to install. Build it from a checkout with a Rust toolchain (1.96 or newer) and [`just`](https://just.systems):
 
 ```bash
-just install
-just build
-node dist/bin/hevy-axi.js --help
+just install          # builds target/release/hevy-axi and copies it to ~/.local/bin
+hevy-axi --version
 ```
 
-Run directly from TypeScript while developing:
+Or run it from source while developing:
 
 ```bash
 just run --help
 just run workout count
 ```
 
-Or build and link the executable into the active pnpm environment:
+To distribute a binary, build it with `just build` and copy `target/release/hevy-axi`. Build it outside `devenv shell`: inside it, macOS binaries link a library from `/nix/store` that other machines lack. Outside it, the binary depends only on system libraries; TLS is built in (rustls), so no OpenSSL is needed.
 
-```bash
-just link
-hevy-axi --version
-```
-
-This repository is currently a private package, so installation is from the checkout rather than the public npm registry.
+This repository is currently private, so installation is from the checkout rather than a package registry.
 
 ## Secure API-key setup
 
@@ -180,7 +174,9 @@ just build
 just check
 ```
 
-`just check` runs linting, Prettier verification, TypeScript checking, the test suite, and a clean TypeScript build. `dist/` is generated; do not edit it by hand. Because this checkout is private and unpublished, `hevy-axi update --check` only reports manual checkout commands; it never contacts npm or changes files.
+`just check` runs format verification, Clippy with warnings denied, all unit and integration tests, and a release build. Integration tests run the real binary against a local mock server, so they need no API key or network. `hevy-axi update --check` only reports how to update; it never contacts the network or changes files.
+
+`just api-sync-check` compares the committed OpenAPI capture with Hevy's live docs (network), and `just api-sync` adopts a change.
 
 ## Limitations and observed live quirks
 

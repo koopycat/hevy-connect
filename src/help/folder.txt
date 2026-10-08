@@ -1,0 +1,15 @@
+Usage: hevy-axi folder <action> [arguments] [flags]
+
+Actions:
+  list                List routine folders
+  view <id>           View one routine folder
+  create              Create at index 0, shifting all existing folders
+
+{{PAGINATION}}
+{{COMMON}}
+{{MUTATION}}
+
+Examples:
+  hevy-axi folder list
+  hevy-axi folder view 42
+  hevy-axi folder create --file folder.json --dry-run
