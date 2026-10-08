@@ -1,0 +1,36 @@
+name: Sync Hevy API
+
+on:
+  schedule:
+    # Weekly, Mondays at 06:17 UTC. Hevy asks scheduled syncs to avoid xx:00.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: api-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm reads its version from the packageManager field in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: scripts/api-sync-pr.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
