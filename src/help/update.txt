@@ -8,5 +8,8 @@ Flags:
   --help              Show this help
 {{COMMON}}
 
-To update, in your checkout of this repository:
+To update, with Homebrew:
+  brew upgrade koopycat/tap/hevy-axi
+
+Or in your checkout of this repository:
   git pull --ff-only && just install
