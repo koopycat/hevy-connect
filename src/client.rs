@@ -8,12 +8,10 @@
 //!   anything echoed back in an error.
 
 use std::io;
-use std::sync::LazyLock;
 use std::thread::sleep;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use regex_lite::Regex;
 use serde_json::{Map, Value, json};
 use url::Url;
 
@@ -25,9 +23,6 @@ const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 const MAX_ERROR_BYTES: usize = 8 * 1024;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 const MAX_BACKOFF: Duration = Duration::from_secs(2);
-
-static SECONDS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\d+(?:\.\d+)?$").expect("valid pattern"));
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Method {
@@ -400,7 +395,14 @@ fn network_cause(error: &ureq::Error) -> Option<&'static str> {
 /// A `Retry-After` header: delay-seconds or an HTTP date, capped.
 fn retry_delay(value: &str) -> Option<Duration> {
     let value = value.trim();
-    if SECONDS.is_match(value) {
+    // Delay-seconds: digits, optionally with one fractional part.
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    let seconds = value
+        .split_once('.')
+        .map_or(digits(value), |(whole, fraction)| {
+            digits(whole) && digits(fraction)
+        });
+    if seconds {
         let seconds: f64 = value.parse().ok()?;
         return Some(
             Duration::try_from_secs_f64(seconds)
@@ -465,7 +467,9 @@ mod tests {
             Some(Duration::ZERO)
         );
         assert_eq!(retry_delay("soon"), None);
-        assert_eq!(retry_delay("-1"), None);
+        for bad in ["-1", ".5", "5.", "1.2.3", "1e3", ""] {
+            assert_eq!(retry_delay(bad), None, "{bad:?}");
+        }
     }
 
     #[test]
