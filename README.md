@@ -26,7 +26,7 @@ just run workout count
 
 To distribute a binary, build it with `just build` and copy `target/release/hevy-axi`. Build it outside `devenv shell`: inside it, macOS binaries link a library from `/nix/store` that other machines lack. Outside it, the binary depends only on system libraries; TLS is built in (rustls), so no OpenSSL is needed.
 
-This repository is currently private, so installation is from the checkout rather than a package registry.
+There is no package registry release yet, so installation is from the checkout.
 
 ## Secure API-key setup
 
