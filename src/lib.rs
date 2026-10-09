@@ -16,6 +16,8 @@ mod output;
 mod read;
 mod resource;
 mod setup;
+#[cfg(test)]
+mod spec;
 mod time;
 mod wire;
 

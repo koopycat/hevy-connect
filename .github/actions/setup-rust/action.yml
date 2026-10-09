@@ -4,7 +4,7 @@ description: Rust toolchain and just.
 runs:
   using: composite
   steps:
-    # The version matches rust-version in Cargo.toml.
+    # A stable release at or above rust-version in Cargo.toml.
     - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
       with:
         toolchain: "1.99"

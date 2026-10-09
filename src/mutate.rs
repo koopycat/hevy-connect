@@ -772,4 +772,55 @@ mod tests {
         assert!(!same_value(None, Some(&Value::Null)));
         assert!(same_value(None, None));
     }
+
+    #[test]
+    fn body_rules_agree_with_the_committed_openapi_capture() {
+        use crate::spec::{properties, property, schema};
+
+        // Resource, then the request schema that decides its replacement body.
+        let bodies = [
+            ("workout", "PostWorkoutsRequestBody"),
+            ("routine", "PutRoutinesRequestBody"),
+            ("exercise", "CreateCustomExerciseRequestBody"),
+            ("folder", "PostRoutineFolderRequestBody"),
+        ];
+        for (resource, request) in bodies {
+            let (envelope, _, rules) = body_shape(find(resource).unwrap()).unwrap();
+            let record = property(schema(request), envelope)
+                .unwrap_or_else(|| panic!("{request} has no {envelope}"));
+            let documented = properties(record);
+            for rule in rules {
+                let field = documented
+                    .get(rule.field)
+                    .unwrap_or_else(|| panic!("{resource}.{} is not in {request}", rule.field));
+                let types: &[&str] = match rule.ty {
+                    NonEmptyString | Text => &["string", "enum"],
+                    Array | StringArray => &["array"],
+                    Boolean => &["boolean"],
+                    Number => &["number", "integer"],
+                };
+                let kind = crate::spec::resolve(field)["type"].as_str().unwrap_or("");
+                assert!(
+                    types.contains(&kind),
+                    "{resource}.{} is {kind} in {request}",
+                    rule.field
+                );
+                assert_eq!(
+                    field["nullable"].as_bool().unwrap_or(false),
+                    rule.nullable,
+                    "{resource}.{} nullability in {request}",
+                    rule.field
+                );
+            }
+            let required = record["required"].as_array().into_iter().flatten();
+            for name in required.filter_map(Value::as_str) {
+                assert!(
+                    rules
+                        .iter()
+                        .any(|rule| rule.field == name && rule.presence != Optional),
+                    "{request} requires {resource}.{name}, which the rules do not"
+                );
+            }
+        }
+    }
 }

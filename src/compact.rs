@@ -426,4 +426,39 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn wire_keys_exist_in_the_committed_openapi_capture() {
+        use crate::spec::{items, properties, property, schema};
+
+        let sets = |parent: &'static Value| {
+            items(property(items(property(parent, "exercises").unwrap()), "sets").unwrap())
+        };
+        let workout = schema("Workout");
+        let routine = schema("Routine");
+        let tables: [(&str, &[Field], &Value); 9] = [
+            ("workout", &WORKOUT, workout),
+            ("workout detail", &WORKOUT_DETAIL, workout),
+            ("workout set", &WORKOUT_SET, sets(workout)),
+            ("routine", &ROUTINE, routine),
+            ("routine set", &ROUTINE_SET, sets(routine)),
+            ("exercise", &EXERCISE, schema("ExerciseTemplate")),
+            ("folder", &FOLDER, schema("RoutineFolder")),
+            ("measurement", &MEASUREMENT, schema("BodyMeasurement")),
+            ("history", &HISTORY, schema("ExerciseHistoryEntry")),
+        ];
+        for (name, fields, record) in tables {
+            for field in fields {
+                if let Source::Key(wire_key) = field.source {
+                    assert!(
+                        properties(record).contains_key(wire_key),
+                        "{name} reads {wire_key}, which docs/hevy-openapi.json no longer documents: review docs/hevy-api-analysis.md"
+                    );
+                }
+            }
+        }
+        for event in ["UpdatedWorkout", "DeletedWorkout"] {
+            assert!(properties(schema(event)).contains_key("type"), "{event}");
+        }
+    }
 }
