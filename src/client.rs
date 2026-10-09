@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value, json};
+use ureq::http::Method;
 use url::Url;
 
 use crate::config::{BaseUrl, Environment, resolve};
@@ -23,23 +24,6 @@ const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 const MAX_ERROR_BYTES: usize = 8 * 1024;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 const MAX_BACKOFF: Duration = Duration::from_secs(2);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Method {
-    Get,
-    Post,
-    Put,
-}
-
-impl Method {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Get => "GET",
-            Self::Post => "POST",
-            Self::Put => "PUT",
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct ClientOptions {
@@ -109,15 +93,15 @@ impl Client {
     }
 
     pub fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
-        self.request(Method::Get, path, query, None)
+        self.request(Method::GET, path, query, None)
     }
 
     pub fn post(&self, path: &str, body: &Value) -> Result<Value> {
-        self.request(Method::Post, path, &[], Some(body))
+        self.request(Method::POST, path, &[], Some(body))
     }
 
     pub fn put(&self, path: &str, body: &Value) -> Result<Value> {
-        self.request(Method::Put, path, &[], Some(body))
+        self.request(Method::PUT, path, &[], Some(body))
     }
 
     fn request(
@@ -140,14 +124,14 @@ impl Client {
         let payload =
             body.map(|body| serde_json::to_vec(body).expect("a JSON value always serializes"));
 
-        let retries = if method == Method::Get {
+        let retries = if method == Method::GET {
             self.options.max_read_retries
         } else {
             0
         };
         let mut attempt = 0;
         loop {
-            match self.attempt(method, &url, payload.as_deref()) {
+            match self.attempt(&method, &url, payload.as_deref()) {
                 Ok(value) => return Ok(value),
                 Err(Failure::Fatal(error)) => return Err(error),
                 Err(Failure::Transient { error, .. }) if attempt >= retries => return Err(error),
@@ -165,12 +149,12 @@ impl Client {
 
     fn attempt(
         &self,
-        method: Method,
+        method: &Method,
         url: &Url,
         payload: Option<&[u8]>,
     ) -> std::result::Result<Value, Failure> {
         let builder = ureq::http::Request::builder()
-            .method(method.as_str())
+            .method(method)
             .uri(url.as_str())
             .header("accept", "application/json")
             .header("content-type", "application/json")
@@ -187,7 +171,7 @@ impl Client {
                 "The Hevy API request could not be built.",
             ))
         })?;
-        let mut response = sent.map_err(|error| self.transport_failure(method, &error))?;
+        let mut response = sent.map_err(|error| self.failure(method, &error))?;
 
         let status = response.status().as_u16();
         if (300..400).contains(&status) {
@@ -218,7 +202,8 @@ impl Client {
             MAX_ERROR_BYTES
         };
         let (bytes, truncated) = read_capped(response.body_mut().as_reader(), limit)
-            .map_err(|error| self.read_failure(method, &error))?;
+            // ureq reports a stalled body as its own timeout wrapped in an `io::Error`.
+            .map_err(|error| self.failure(method, &error.into()))?;
         let text = String::from_utf8_lossy(&bytes);
         let body = parse_body(&text, content_type.as_deref());
 
@@ -244,7 +229,7 @@ impl Client {
 
     fn http_error(
         &self,
-        method: Method,
+        method: &Method,
         status: u16,
         body: Option<Value>,
         truncated: bool,
@@ -278,55 +263,42 @@ impl Client {
         error
     }
 
-    fn transport_failure(&self, method: Method, error: &ureq::Error) -> Failure {
-        if let ureq::Error::Timeout(_) = error {
-            return Failure::Fatal(self.timeout_error(method));
+    /// A request that got no complete response. A timeout is final; any other
+    /// transport failure may be retried.
+    fn failure(&self, method: &Method, error: &ureq::Error) -> Failure {
+        let timed_out = match error {
+            ureq::Error::Timeout(_) => true,
+            ureq::Error::Io(error) => error.kind() == io::ErrorKind::TimedOut,
+            _ => false,
+        };
+        let mut failed = if timed_out {
+            Error::new(Code::Timeout, "The Hevy API request timed out.")
+                .with_details(json!({ "timeoutMs": self.options.timeout.as_millis() as u64 }))
+        } else {
+            let failed = Error::new(Code::Network, "The Hevy API request failed.");
+            match network_cause(error) {
+                Some(cause) => failed.with_details(json!({ "cause": cause })),
+                None => failed,
+            }
+        };
+        failed.suggestions = mutation_suggestions(method);
+        if timed_out {
+            Failure::Fatal(failed)
+        } else {
+            Failure::Transient {
+                error: failed,
+                retry_after: None,
+            }
         }
-        let cause = network_cause(error);
-        let mut network = Error::new(Code::Network, "The Hevy API request failed.");
-        if let Some(cause) = cause {
-            network = network.with_details(json!({ "cause": cause }));
-        }
-        network.suggestions = mutation_suggestions(method);
-        Failure::Transient {
-            error: network,
-            retry_after: None,
-        }
-    }
-
-    fn read_failure(&self, method: Method, error: &io::Error) -> Failure {
-        // ureq reports a stalled body as its own timeout wrapped in an `io::Error`.
-        let wrapped_timeout = error
-            .get_ref()
-            .and_then(|inner| inner.downcast_ref::<ureq::Error>())
-            .is_some_and(|inner| matches!(inner, ureq::Error::Timeout(_)));
-        if wrapped_timeout || error.kind() == io::ErrorKind::TimedOut {
-            return Failure::Fatal(self.timeout_error(method));
-        }
-        let mut network = Error::new(Code::Network, "The Hevy API request failed.");
-        network.suggestions = mutation_suggestions(method);
-        Failure::Transient {
-            error: network,
-            retry_after: None,
-        }
-    }
-
-    fn timeout_error(&self, method: Method) -> Error {
-        let mut error = Error::new(Code::Timeout, "The Hevy API request timed out.")
-            .with_details(json!({ "timeoutMs": self.options.timeout.as_millis() as u64 }));
-        error.suggestions = mutation_suggestions(method);
-        error
     }
 }
 
 /// A mutation that fails mid-flight may still have been applied.
-fn mutation_suggestions(method: Method) -> Vec<String> {
-    match method {
-        Method::Get => Vec::new(),
-        Method::Post | Method::Put => vec![
-            "The mutation outcome may be unknown. Inspect Hevy before manually retrying to avoid a duplicate or overwrite.".to_owned(),
-        ],
+fn mutation_suggestions(method: &Method) -> Vec<String> {
+    if *method == Method::GET {
+        return Vec::new();
     }
+    vec!["The mutation outcome may be unknown. Inspect Hevy before manually retrying to avoid a duplicate or overwrite.".to_owned()]
 }
 
 fn describe_status(status: u16) -> (Code, String, &'static [&'static str]) {
