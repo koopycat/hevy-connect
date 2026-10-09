@@ -1,0 +1,18 @@
+# Gitleaks config for the pre-commit hook and .github/workflows/security.yml.
+# The default rules stay on; the rule below adds the Hevy API key, a plain UUID
+# that no default rule recognises.
+title = "hevy-connect"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "hevy-api-key"
+description = "Hevy API key"
+regex = '''(?i)hevy[_-]?api[_-]?key["']?\s*[:=]\s*["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b'''
+secretGroup = 1
+keywords = ["hevy"]
+
+  # .env.example ships the all-zero placeholder.
+  [rules.allowlist]
+  regexes = ['''^0{8}-0{4}-0{4}-0{4}-0{12}$''']
