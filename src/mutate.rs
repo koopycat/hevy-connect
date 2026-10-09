@@ -301,33 +301,53 @@ impl Submission {
     }
 
     /// The command that would perform this mutation for real.
-    fn confirm_command(&self, spec: &Spec, update: bool) -> String {
-        let action = if update { "update <id>" } else { "create" };
-        format!(
+    fn confirm_command(&self, spec: &Spec, action: &str) -> Value {
+        json!([format!(
             "hevy-axi {} {action} --file {} --confirm",
             spec.name,
             shell_argument(&self.file)
-        )
+        )])
     }
+
+    /// The fields every preview (dry run) or result starts with.
+    fn outcome(&self, method: &str, path: &str, idempotent: bool) -> Vec<(&'static str, Value)> {
+        let mut outcome = vec![
+            if self.dry_run {
+                ("dryRun", true.into())
+            } else {
+                ("status", "success".into())
+            },
+            ("method", method.into()),
+            ("path", path.into()),
+            ("idempotent", idempotent.into()),
+        ];
+        if !self.dry_run {
+            outcome.push(("retried", false.into()));
+        }
+        outcome
+    }
+}
+
+fn to_object(fields: Vec<(&str, Value)>) -> Value {
+    Value::Object(fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
 }
 
 /// Semantics worth stating explicitly, shared by previews and results.
 fn semantics(spec: &Spec, update: bool) -> Vec<(&'static str, Value)> {
-    let mut extra = Vec::new();
-    if update && !spec.is_measurement() {
-        extra.push(("semantics", json!("full_replacement")));
+    if update {
+        vec![("semantics", "full_replacement".into())]
+    } else if spec.name == "folder" {
+        vec![
+            ("insertionIndex", 0.into()),
+            ("shiftsExistingFolders", true.into()),
+        ]
+    } else {
+        Vec::new()
     }
-    if spec.name == "folder" && !update {
-        extra.push(("insertionIndex", json!(0)));
-        extra.push(("shiftsExistingFolders", json!(true)));
-    }
-    extra
 }
 
-fn method_name(update: bool) -> &'static str {
-    if update { "PUT" } else { "POST" }
-}
-
+/// Create any resource, or replace one that is not a measurement (those
+/// update through [`update_measurement`]).
 pub fn run(
     env: &Environment,
     parsed: &Parsed,
@@ -339,72 +359,43 @@ pub fn run(
     let submission = Submission::read(env, parsed)?;
     let body = prepare_body(spec, submission.input.clone(), update)?;
     let checks_title = spec.name == "exercise" && !update;
+    let mut out = submission.outcome(if update { "PUT" } else { "POST" }, path, update);
+    out.extend(semantics(spec, update));
 
     if submission.dry_run {
-        let mut preview = Map::new();
-        preview.insert("dryRun".into(), true.into());
-        preview.insert("method".into(), method_name(update).into());
-        preview.insert("path".into(), path.into());
-        preview.insert("idempotent".into(), update.into());
-        preview.extend(
-            semantics(spec, update)
-                .into_iter()
-                .map(|(k, v)| (k.to_owned(), v)),
-        );
         if checks_title {
             // Dry-run stays offline, so the title check runs only on --confirm.
-            preview.insert(
-                "duplicateCheck".into(),
+            out.push((
+                "duplicateCheck",
                 "runs on --confirm; refuses an existing title unless --allow-duplicate".into(),
-            );
+            ));
         }
         let envelope = body_shape(spec).map_or("none", |(key, ..)| key);
-        preview.insert(
-            "bodySummary".into(),
+        out.push((
+            "bodySummary",
             json!({ "envelope": envelope, "fields": body_fields(spec, &body) }),
-        );
+        ));
         if options.full {
-            preview.insert("body".into(), body);
+            out.push(("body", body));
         }
-        preview.insert(
-            "help".into(),
-            json!([submission.confirm_command(spec, update)]),
-        );
-        return Ok(options.render(Value::Object(preview)));
+        let action = if update { "update <id>" } else { "create" };
+        out.push(("help", submission.confirm_command(spec, action)));
+        return Ok(options.render(to_object(out)));
     }
 
     let client = Client::configured(env)?;
-    let duplicate_check = if checks_title {
-        Some(check_exercise_title_unique(
-            &client,
-            &body,
-            parsed.switch("allow-duplicate"),
-        )?)
-    } else {
-        None
-    };
+    if checks_title {
+        let allow_duplicate = parsed.switch("allow-duplicate");
+        let check = check_exercise_title_unique(&client, &body, allow_duplicate)?;
+        out.push(("duplicateCheck", check));
+    }
     let response = if update {
         client.put(path, &body)?
     } else {
         client.post(path, &body)?
     };
-
-    let mut result = Map::new();
-    result.insert("status".into(), "success".into());
-    result.insert("method".into(), method_name(update).into());
-    result.insert("path".into(), path.into());
-    result.insert("idempotent".into(), update.into());
-    result.insert("retried".into(), false.into());
-    result.extend(
-        semantics(spec, update)
-            .into_iter()
-            .map(|(k, v)| (k.to_owned(), v)),
-    );
-    if let Some(check) = duplicate_check {
-        result.insert("duplicateCheck".into(), check);
-    }
-    result.insert("result".into(), response);
-    options.render_projected(Value::Object(result))
+    out.push(("result", response));
+    options.render_projected(to_object(out))
 }
 
 fn normalize_title(title: &str) -> String {
@@ -499,33 +490,25 @@ pub fn update_measurement(
     let path = format!("{}/{date}", spec.path);
     let patch_fields: Vec<&str> = patch.keys().map(String::as_str).collect();
 
-    let mut result = Map::new();
-    let mut put = |key: &str, value: Value| {
-        result.insert(key.to_owned(), value);
-    };
-    if submission.dry_run {
-        put("dryRun", true.into());
-        put("method", "PUT".into());
-        put("path", path.into());
-        put("idempotent", true.into());
-        put("strategy", "merge_with_current".into());
-        put(
+    let mut out = submission.outcome("PUT", &path, true);
+    out.extend([
+        ("strategy", "merge_with_current".into()),
+        (
             "semantics",
             "partial_patch_merged_into_complete_replacement".into(),
-        );
-        put("patchFields", json!(patch_fields));
-        put("readBeforeWrite", false.into());
+        ),
+        ("patchFields", json!(patch_fields)),
+    ]);
+    if submission.dry_run {
+        out.push(("readBeforeWrite", false.into()));
         if options.full {
-            put("patch", Value::Object(patch.clone()));
+            out.push(("patch", Value::Object(patch.clone())));
         }
-        put(
+        out.push((
             "help",
-            json!([format!(
-                "hevy-axi measurement update {date} --file {} --confirm",
-                shell_argument(&submission.file)
-            )]),
-        );
-        return Ok(options.render(Value::Object(result)));
+            submission.confirm_command(spec, &format!("update {date}")),
+        ));
+        return Ok(options.render(to_object(out)));
     }
 
     let client = Client::configured(env)?;
@@ -574,21 +557,12 @@ pub fn update_measurement(
         .collect();
     let response = client.put(&path, &Value::Object(merged))?;
 
-    put("status", "success".into());
-    put("method", "PUT".into());
-    put("path", path.into());
-    put("idempotent", true.into());
-    put("retried", false.into());
-    put("strategy", "merge_with_current".into());
-    put(
-        "semantics",
-        "partial_patch_merged_into_complete_replacement".into(),
-    );
-    put("patchFields", json!(patch_fields));
-    put("changedFields", json!(changed));
-    put("readBeforeWrite", true.into());
-    put("result", response);
-    options.render_projected(Value::Object(result))
+    out.extend([
+        ("changedFields", json!(changed)),
+        ("readBeforeWrite", true.into()),
+        ("result", response),
+    ]);
+    options.render_projected(to_object(out))
 }
 
 #[cfg(test)]
