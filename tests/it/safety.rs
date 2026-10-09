@@ -618,14 +618,6 @@ fn mutation_bodies_are_checked_before_anything_is_sent() {
             json!({ "workout": {}, "extra": 1 }),
             "The workout envelope must not contain sibling fields.",
         ),
-        (
-            json!({ "title": "  ", "start_time": "a", "end_time": "b", "exercises": [] }),
-            "Workout title must be a non-empty string.",
-        ),
-        (
-            json!({ "title": "x", "start_time": "a", "end_time": "b", "exercises": {} }),
-            "Workout exercises must be an array.",
-        ),
         (json!([1]), "The mutation input must be a JSON object."),
     ] {
         let output = cli.run_with_stdin(

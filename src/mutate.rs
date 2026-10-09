@@ -42,69 +42,49 @@ const MEASUREMENT_FIELDS: [&str; 17] = [
     "right_calf",
 ];
 
-#[derive(Clone, Copy)]
-enum Ty {
-    NonEmptyString,
-    String,
-    Array,
-    Boolean,
-    Number,
-    StringArray,
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum Presence {
     Required,
     /// Required for a full replacement, optional when creating.
     RequiredOnUpdate,
-    Optional,
 }
 
-/// One field of a request body: its type, and whether `null` is accepted.
+/// A field a request body must contain. Values are left for Hevy to judge.
 struct Rule {
     field: &'static str,
-    ty: Ty,
-    nullable: bool,
     presence: Presence,
 }
 
-const fn rule(field: &'static str, ty: Ty, nullable: bool, presence: Presence) -> Rule {
-    Rule {
-        field,
-        ty,
-        nullable,
-        presence,
-    }
+const fn rule(field: &'static str, presence: Presence) -> Rule {
+    Rule { field, presence }
 }
 
-use Presence::{Optional, Required, RequiredOnUpdate};
-use Ty::{Array, Boolean, NonEmptyString, Number, String as Text, StringArray};
+use Presence::{Required, RequiredOnUpdate};
 
 /// How each resource's request body is wrapped and which fields it must have.
-/// Unlisted fields pass through for Hevy to judge.
+/// A full replacement must name every field it would otherwise clear.
 fn body_shape(spec: &Spec) -> Option<(&'static str, &'static str, &'static [Rule])> {
-    const WORKOUT: [Rule; 6] = [
-        rule("title", NonEmptyString, false, Required),
-        rule("start_time", Text, false, Required),
-        rule("end_time", Text, false, Required),
-        rule("description", Text, true, RequiredOnUpdate),
-        rule("exercises", Array, false, Required),
-        rule("is_private", Boolean, false, Optional),
+    const WORKOUT: [Rule; 5] = [
+        rule("title", Required),
+        rule("start_time", Required),
+        rule("end_time", Required),
+        rule("description", RequiredOnUpdate),
+        rule("exercises", Required),
     ];
     const ROUTINE: [Rule; 4] = [
-        rule("title", NonEmptyString, false, Required),
-        rule("folder_id", Number, true, RequiredOnUpdate),
-        rule("notes", Text, true, RequiredOnUpdate),
-        rule("exercises", Array, false, Required),
+        rule("title", Required),
+        rule("folder_id", RequiredOnUpdate),
+        rule("notes", RequiredOnUpdate),
+        rule("exercises", Required),
     ];
     const EXERCISE: [Rule; 5] = [
-        rule("title", NonEmptyString, false, Required),
-        rule("exercise_type", Text, false, Required),
-        rule("equipment_category", Text, false, Required),
-        rule("muscle_group", Text, false, Required),
-        rule("other_muscles", StringArray, false, Required),
+        rule("title", Required),
+        rule("exercise_type", Required),
+        rule("equipment_category", Required),
+        rule("muscle_group", Required),
+        rule("other_muscles", Required),
     ];
-    const FOLDER: [Rule; 1] = [rule("title", NonEmptyString, false, Required)];
+    const FOLDER: [Rule; 1] = [rule("title", Required)];
     match spec.name {
         "workout" => Some(("workout", "Workout", &WORKOUT)),
         "routine" => Some(("routine", "Routine", &ROUTINE)),
@@ -114,38 +94,8 @@ fn body_shape(spec: &Spec) -> Option<(&'static str, &'static str, &'static [Rule
     }
 }
 
-fn check_type(rule: &Rule, value: &Value, description: &str) -> Result<()> {
-    if rule.nullable && value.is_null() {
-        return Ok(());
-    }
-    let wrong = |expected: &str| {
-        let or_null = if rule.nullable { " or null" } else { "" };
-        Error::validation(format!(
-            "{description} {} must be {expected}{or_null}.",
-            rule.field
-        ))
-    };
-    match rule.ty {
-        NonEmptyString if value.as_str().is_none_or(|s| s.trim().is_empty()) => {
-            Err(wrong("a non-empty string"))
-        }
-        Text if !value.is_string() => Err(wrong("a string")),
-        Array if !value.is_array() => Err(wrong("an array")),
-        Boolean if !value.is_boolean() => Err(wrong("a boolean")),
-        Number if !value.is_number() => Err(wrong("a number")),
-        StringArray => match value.as_array() {
-            None => Err(wrong("an array")),
-            Some(items) if items.iter().any(|item| !item.is_string()) => Err(Error::validation(
-                format!("{description} {} entries must be strings.", rule.field),
-            )),
-            Some(_) => Ok(()),
-        },
-        _ => Ok(()),
-    }
-}
-
 /// The request body for a wrapped resource: the input wrapped in its envelope
-/// (unless already wrapped), checked against the resource's rules.
+/// (unless already wrapped), with every field its rules require.
 fn wrapped_body(
     input: Map<String, Value>,
     key: &str,
@@ -183,11 +133,6 @@ fn wrapped_body(
             "{description} is missing required field(s): {}.",
             missing.join(", ")
         )));
-    }
-    for rule in rules {
-        if let Some(value) = inner.get(rule.field) {
-            check_type(rule, value, description)?;
-        }
     }
     Ok(json!({ key: inner }))
 }
@@ -646,52 +591,6 @@ mod tests {
     }
 
     #[test]
-    fn field_types_are_checked() {
-        let workout = |patch: Value| {
-            let mut base =
-                json!({"title": "T", "start_time": "a", "end_time": "b", "exercises": []});
-            base.as_object_mut()
-                .unwrap()
-                .extend(patch.as_object().unwrap().clone());
-            body("workout", base, false)
-        };
-        assert_eq!(
-            message(workout(json!({"title": "  "}))),
-            "Workout title must be a non-empty string."
-        );
-        assert_eq!(
-            message(workout(json!({"start_time": 1}))),
-            "Workout start_time must be a string."
-        );
-        assert_eq!(
-            message(workout(json!({"exercises": {}}))),
-            "Workout exercises must be an array."
-        );
-        assert_eq!(
-            message(workout(json!({"description": 5}))),
-            "Workout description must be a string or null."
-        );
-        assert_eq!(
-            message(workout(json!({"is_private": "yes"}))),
-            "Workout is_private must be a boolean."
-        );
-        assert!(workout(json!({"description": null, "is_private": true})).is_ok());
-        assert_eq!(
-            message(body(
-                "routine",
-                json!({"title": "R", "exercises": [], "folder_id": "x"}),
-                false
-            )),
-            "Routine folder_id must be a number or null."
-        );
-        let exercise = json!({"title": "E", "exercise_type": "t", "equipment_category": "e", "muscle_group": "m", "other_muscles": ["a", 1]});
-        assert_eq!(
-            message(body("exercise", exercise, false)),
-            "Exercise other_muscles entries must be strings."
-        );
-    }
-
-    #[test]
     fn measurement_bodies_allow_documented_fields_only() {
         assert!(
             body(
@@ -764,34 +663,16 @@ mod tests {
                 .unwrap_or_else(|| panic!("{request} has no {envelope}"));
             let documented = properties(record);
             for rule in rules {
-                let field = documented
-                    .get(rule.field)
-                    .unwrap_or_else(|| panic!("{resource}.{} is not in {request}", rule.field));
-                let types: &[&str] = match rule.ty {
-                    NonEmptyString | Text => &["string", "enum"],
-                    Array | StringArray => &["array"],
-                    Boolean => &["boolean"],
-                    Number => &["number", "integer"],
-                };
-                let kind = crate::spec::resolve(field)["type"].as_str().unwrap_or("");
                 assert!(
-                    types.contains(&kind),
-                    "{resource}.{} is {kind} in {request}",
-                    rule.field
-                );
-                assert_eq!(
-                    field["nullable"].as_bool().unwrap_or(false),
-                    rule.nullable,
-                    "{resource}.{} nullability in {request}",
+                    documented.contains_key(rule.field),
+                    "{resource}.{} is not in {request}",
                     rule.field
                 );
             }
             let required = record["required"].as_array().into_iter().flatten();
             for name in required.filter_map(Value::as_str) {
                 assert!(
-                    rules
-                        .iter()
-                        .any(|rule| rule.field == name && rule.presence != Optional),
+                    rules.iter().any(|rule| rule.field == name),
                     "{request} requires {resource}.{name}, which the rules do not"
                 );
             }
