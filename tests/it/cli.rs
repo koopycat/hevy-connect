@@ -442,6 +442,10 @@ fn pagination_flags_are_validated_before_any_request() {
     let cli = Cli::against(&mock);
     for (args, message) in [
         (vec!["--page", "0"], "--page must be a positive integer."),
+        // A negative number is not taken as the value, and short flags are not split.
+        (vec!["--page", "-1"], "--page requires a value."),
+        (vec!["-abc"], "Unknown flag: -abc."),
+        (vec!["-"], "Unknown flag: -."),
         (vec!["--page-size", "11"], "--page-size must not exceed 10."),
         (
             vec!["--all", "--page", "2"],
