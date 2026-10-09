@@ -407,17 +407,6 @@ fn a_stored_key_is_written_privately_read_from_stdin_only_and_removable() {
     assert!(!path_exists(&path));
 }
 
-#[test]
-fn update_only_reports_and_never_touches_the_network() {
-    let output = Cli::new()
-        .without_key()
-        .run(&["update", "--check", "--json"]);
-    let report = output.json();
-    assert_eq!(report["status"], "manual_update_required");
-    assert_eq!(report["currentVersion"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(Cli::new().run(&["update", "x"]).code, 2);
-}
-
 // ---- mutations
 
 const WORKOUT: &str = r#"{"title":"Push","start_time":"2024-03-01T10:00:00Z","end_time":"2024-03-01T11:00:00Z","exercises":[]}"#;

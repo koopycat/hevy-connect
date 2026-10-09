@@ -66,7 +66,6 @@ Every resource supports `--help`. These actions map to the complete documented A
 | `folder`      | `list`, `create`, `view <id>`                                   | 3 routine-folder operations                                       |
 | `measurement` | `list`, `create`, `view <YYYY-MM-DD>`, `update <YYYY-MM-DD>`    | 4 body-measurement operations                                     |
 | `setup`       | `status`, `key`, `remove-key`                                   | Local credential setup; no Hevy API operation                     |
-| `update`      | `--check`                                                       | Read-only manual checkout update instructions                     |
 
 Running `hevy-axi` with no arguments shows the home view: whether a key is configured, its credential source, and next commands. It makes no API call and shows no account or workout data, so it is safe to run at the start of every agent session.
 
@@ -161,7 +160,7 @@ just build
 just check
 ```
 
-`just check` runs format verification, Clippy with warnings denied, all unit and integration tests, and a release build. Integration tests run the real binary against a local mock server, so they need no API key or network. `hevy-axi update --check` only reports how to update; it never contacts the network or changes files.
+`just check` runs format verification, Clippy with warnings denied, all unit and integration tests, and a release build. Integration tests run the real binary against a local mock server, so they need no API key or network.
 
 `just api-sync-check` compares the committed OpenAPI capture with Hevy's live docs (network), and `just api-sync` adopts a change.
 

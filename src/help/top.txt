@@ -11,6 +11,5 @@ Commands:
   folder       list, view, create
   measurement  list, view, create, update
   setup        status, key, remove-key
-  update       Report the installed version and how to update it
 
 Run "hevy-axi <command> --help" for every action, flag, and example.

@@ -75,7 +75,6 @@ fn dispatch(argv: &[String], env: &Environment, exe: &Path) -> Result<String> {
 
     match command.as_str() {
         "setup" => setup_command(env, args),
-        "update" => update_command(exe, args),
         name => match resource::find(name) {
             Some(spec) => resource_command(env, spec, args),
             None => Err(Error::validation(format!("Unknown command: {name}."))
@@ -201,19 +200,6 @@ fn setup_command(env: &Environment, args: &[String]) -> Result<String> {
     parsed.expect_positionals(0, &usage("setup", action, false, false))?;
     let options = OutputOptions::from_args(&parsed)?;
     setup::run(env, action, &parsed, &options)
-}
-
-fn update_command(exe: &Path, args: &[String]) -> Result<String> {
-    let parsed = args::parse(args, &[OUTPUT, &["check"]])?;
-    parsed.expect_positionals(0, "hevy-axi update [--check] [flags]")?;
-    let options = OutputOptions::from_args(&parsed)?;
-    // --check is accepted for AXI compatibility; both forms only report.
-    options.render_projected(json!({
-        "status": "manual_update_required",
-        "currentVersion": env!("CARGO_PKG_VERSION"),
-        "executable": exe.display().to_string(),
-        "help": ["With Homebrew: brew upgrade koopycat/tap/hevy-axi", "From a checkout of the repository: git pull --ff-only && just install", "hevy-axi --version"],
-    }))
 }
 
 /// The home view: local configuration only, with no API call and no account or

@@ -15,7 +15,6 @@ fn page(command: &str) -> Option<&'static str> {
         "exercise" => include_str!("help/exercise.txt"),
         "folder" => include_str!("help/folder.txt"),
         "measurement" => include_str!("help/measurement.txt"),
-        "update" => include_str!("help/update.txt"),
         "setup" => include_str!("help/setup.txt"),
         _ => return None,
     })
@@ -45,10 +44,7 @@ mod tests {
 
     #[test]
     fn every_command_has_a_page_with_no_unresolved_blocks() {
-        let commands = RESOURCES
-            .iter()
-            .map(|spec| spec.name)
-            .chain(["setup", "update"]);
+        let commands = RESOURCES.iter().map(|spec| spec.name).chain(["setup"]);
         for name in commands {
             let help = command(name).unwrap_or_else(|| panic!("no help for {name}"));
             assert!(help.starts_with("Usage: hevy-axi "), "{name}");
