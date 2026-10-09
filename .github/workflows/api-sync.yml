@@ -15,10 +15,9 @@ concurrency:
 
 jobs:
   # Runs project code (cargo, just check) and reads third-party data. It holds
-  # no write credential, and its checkout does not persist one. It runs on the
-  # homelab runners (SYS-ci-runner): disposable VM, internet only.
+  # no write credential, and its checkout does not persist one.
   refresh:
-    runs-on: [self-hosted, linux, x64, homelab]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
