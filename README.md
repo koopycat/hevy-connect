@@ -10,7 +10,14 @@ Hevy describes its [Public API](https://api.hevyapp.com/docs/) as an early rollo
 
 ## Install and run
 
-`hevy-axi` is one self-contained native binary (macOS and Linux, about 2 MB) with no runtime to install. Build it from a checkout with a Rust toolchain (1.96 or newer) and [`just`](https://just.systems):
+`hevy-axi` is one self-contained native binary (macOS and Linux, about 2 MB) with no runtime to install. With Homebrew (macOS and Linux, arm64 and amd64):
+
+```bash
+brew install koopycat/tap/hevy-axi
+hevy-axi --version
+```
+
+Or build it from a checkout with a Rust toolchain (1.96 or newer) and [`just`](https://just.systems):
 
 ```bash
 just install          # builds target/release/hevy-axi and copies it to ~/.local/bin
@@ -24,9 +31,7 @@ just run --help
 just run workout count
 ```
 
-To distribute a binary, build it with `just build` and copy `target/release/hevy-axi`. Build it outside `devenv shell`: inside it, macOS binaries link a library from `/nix/store` that other machines lack. Outside it, the binary depends only on system libraries; TLS is built in (rustls), so no OpenSSL is needed.
-
-There is no package registry release yet, so installation is from the checkout.
+Releases are built by `.github/workflows/release.yml` (see AGENTS.md). To build a binary by hand, use `just build` and copy `target/release/hevy-axi`. Build it outside `devenv shell`: inside it, macOS binaries link a library from `/nix/store` that other machines lack. Outside it, the binary depends only on system libraries; TLS is built in (rustls), so no OpenSSL is needed.
 
 ## Secure API-key setup
 

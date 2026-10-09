@@ -212,7 +212,7 @@ fn update_command(exe: &Path, args: &[String]) -> Result<String> {
         "status": "manual_update_required",
         "currentVersion": env!("CARGO_PKG_VERSION"),
         "executable": exe.display().to_string(),
-        "help": ["In your checkout of this repository: git pull --ff-only && just install", "hevy-axi --version"],
+        "help": ["With Homebrew: brew upgrade koopycat/tap/hevy-axi", "From a checkout of the repository: git pull --ff-only && just install", "hevy-axi --version"],
     }))
 }
 

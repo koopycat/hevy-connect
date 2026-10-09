@@ -11,6 +11,10 @@ devenv shell -- just check
 
 `just check` is the only gate: format, Clippy with warnings denied, all tests, release build. Tests run the real binary against a local mock server; never call the real Hevy API from a test. `just api-sync` and `just api-sync-check` need the network and stay out of `check`. Build binaries you distribute (`just install`, releases) outside `devenv shell`: inside it, macOS binaries link a `/nix/store` libiconv that other machines lack.
 
+## Releases
+
+Bump `version` in `Cargo.toml` (the lockfile follows), merge to `main`, then tag that commit `vX.Y.Z` and push the tag. `release.yml` refuses a tag whose core version differs from `Cargo.toml`, runs `just check`, builds darwin and linux archives for arm64 and amd64 on native runners, publishes the GitHub release with `checksums.txt`, and writes `Formula/hevy-axi.rb` in `koopycat/homebrew-tap` through the `HOMEBREW_APP_ID` and `HOMEBREW_APP_PRIVATE_KEY` secrets. A tag with a prerelease suffix (`v0.2.0-rc.1`) publishes a prerelease and leaves the tap alone. The binary's `--version` output is the bare version and the formula test asserts it.
+
 ## Invariants
 
 - Never commit or print API keys, real Hevy IDs, or personal health/workout data; `.env` and credential files remain local and mode `0600`. Gitleaks (`.gitleaks.toml`, pre-commit hooks, `.github/workflows/security.yml`) scans every commit; a finding is fixed, never allowlisted to get past it.
