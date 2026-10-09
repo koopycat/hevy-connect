@@ -94,12 +94,12 @@ jobs:
           cp "target/${TARGET}/release/${BINARY_NAME}" "$package_dir/"
           cp README.md LICENSE "$package_dir/"
 
-          # The binary reports the version it was built from, so this checks
-          # the tag against Cargo.toml for every target that can run here.
+          # The binary reports the Cargo.toml version, which is the tag without
+          # a prerelease suffix. This checks every target that can run here.
           if [[ "$TARGET" != "x86_64-apple-darwin" ]]; then
             actual_version="$("${package_dir}/${BINARY_NAME}" --version)"
-            if [[ "$actual_version" != "$version" ]]; then
-              echo "::error title=Version mismatch::Expected ${version}, got ${actual_version}"
+            if [[ "$actual_version" != "${version%%[-+]*}" ]]; then
+              echo "::error title=Version mismatch::Expected ${version%%[-+]*}, got ${actual_version}"
               exit 1
             fi
           fi
