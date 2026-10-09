@@ -13,7 +13,7 @@ devenv shell -- just check
 
 ## Invariants
 
-- Never commit or print API keys, real Hevy IDs, or personal health/workout data; `.env` and credential files remain local and mode `0600`.
+- Never commit or print API keys, real Hevy IDs, or personal health/workout data; `.env` and credential files remain local and mode `0600`. Gitleaks (`.gitleaks.toml`, pre-commit hooks, `.github/workflows/security.yml`) scans every commit; a finding is fixed, never allowlisted to get past it.
 - Never add response, health-data, or synchronization caches. Commands read live state and redact credentials from failures.
 - Never add Node, pnpm, TypeScript, or other runtime dependencies: the binary stays self-contained. The only JavaScript is the OpenCode plugin template `src/opencode_plugin.js`, written out for OpenCode to run. macOS and Linux only.
 - Treat the Hevy API as unstable: responses are read as plain JSON with tolerant envelope handling, not rigid types. Re-check the official contract before release; see `docs/hevy-api-analysis.md`.
