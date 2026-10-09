@@ -57,7 +57,7 @@ pub fn run(
             };
             json!({
                 "configured": config.api_key.is_some(),
-                "credentialSource": config.credential_category(env),
+                "credentialSource": config.credential_category(),
                 "baseUrl": config.base_url.as_str(),
                 "help": help,
             })

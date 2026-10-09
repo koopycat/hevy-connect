@@ -186,11 +186,16 @@ impl Cli {
 
     /// Write a file under the project directory with the given mode.
     pub fn file(&self, name: &str, contents: &str, mode: u32) -> PathBuf {
-        let path = self.project().join(name);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, contents).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
-        path
+        write(self.project().join(name), contents, mode)
+    }
+
+    /// Write the stored credential file with the given mode.
+    pub fn stored_credentials(&self, contents: &str, mode: u32) -> PathBuf {
+        write(
+            self.home().join(".config/hevy-axi/credentials.env"),
+            contents,
+            mode,
+        )
     }
 
     pub fn run(&self, args: &[&str]) -> Output {
@@ -241,4 +246,11 @@ impl Cli {
 
 pub fn path_exists(path: &Path) -> bool {
     path.symlink_metadata().is_ok()
+}
+
+fn write(path: PathBuf, contents: &str, mode: u32) -> PathBuf {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, contents).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+    path
 }

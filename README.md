@@ -35,14 +35,12 @@ Releases are built by `.github/workflows/release.yml` (see AGENTS.md). To build 
 
 ## Secure API-key setup
 
-Never put a key on the command line. Choose one of these sources, in precedence order:
+Never put a key on the command line. The CLI reads the key from one of two sources, in precedence order:
 
 1. `HEVY_API_KEY` in the process environment.
-2. A credential file selected by `HEVY_AXI_ENV_FILE`.
-3. `.env` in the current project.
-4. `~/.config/hevy-axi/credentials.env`, written by `setup key`.
+2. `~/.config/hevy-axi/credentials.env`, written by `setup key`.
 
-For global storage, read the key without echoing it and send it over stdin:
+A project `.env` is never read. For global storage, read the key without echoing it and send it over stdin:
 
 ```bash
 read -rsp "Hevy API key: " HEVY_API_KEY; printf '\n'
@@ -51,15 +49,9 @@ unset HEVY_API_KEY
 hevy-axi setup status
 ```
 
-For one process, export `HEVY_API_KEY` through your shell or secret manager. For a project file, create `.env` privately and keep it untracked:
+For one process, export `HEVY_API_KEY` through your shell or secret manager.
 
-```bash
-umask 077
-printf 'HEVY_API_KEY=%s\n' "$HEVY_API_KEY" > .env
-chmod 600 .env
-```
-
-On POSIX systems, any credential file that sets `HEVY_API_KEY` or `HEVY_API_BASE_URL` must be owned by you with no group or world permissions (mode `0600`); otherwise the CLI refuses it. Credential paths must be regular files, never symlinks. A project `.env` that sets neither variable is ignored whatever its mode, as is a `.env` directory such as a Python virtualenv. Global setup secures the directory as `0700`, writes the file atomically as `0600`, and never returns the key. Windows does not expose the same POSIX mode check. `setup remove-key --confirm` removes only the global file, not environment, explicit-file, or project credentials.
+The stored file must be a regular file (never a symlink) owned by you with no group or world permissions (mode `0600`); otherwise the CLI refuses it. Setup secures the directory as `0700`, writes the file atomically as `0600`, and never returns the key. `setup remove-key --confirm` removes only the stored file, not an environment key.
 
 ## Commands and API coverage
 
@@ -73,7 +65,7 @@ Every resource supports `--help`. These actions map to the complete documented A
 | `exercise`    | `list`, `create`, `view <id>`, `history <id>`                   | 3 exercise-template operations plus exercise history              |
 | `folder`      | `list`, `create`, `view <id>`                                   | 3 routine-folder operations                                       |
 | `measurement` | `list`, `create`, `view <YYYY-MM-DD>`, `update <YYYY-MM-DD>`    | 4 body-measurement operations                                     |
-| `setup`       | `status`, `key`, `remove-key`                                     | Local credential setup; no Hevy API operation |
+| `setup`       | `status`, `key`, `remove-key`                                   | Local credential setup; no Hevy API operation                     |
 | `update`      | `--check`                                                       | Read-only manual checkout update instructions                     |
 
 Running `hevy-axi` with no arguments shows the home view: whether a key is configured, its credential source, and next commands. It makes no API call and shows no account or workout data, so it is safe to run at the start of every agent session.
@@ -155,10 +147,9 @@ To show agents whether Hevy is configured at the start of a session, run `hevy-a
 | Setting             | Purpose                                                         |
 | ------------------- | --------------------------------------------------------------- |
 | `HEVY_API_KEY`      | Preferred process-level API key                                 |
-| `HEVY_AXI_ENV_FILE` | Explicit credential file, resolved before project/global files  |
 | `HEVY_API_BASE_URL` | Explicit API origin override; default `https://api.hevyapp.com` |
 
-`HEVY_API_BASE_URL` is never discovered from Swagger or a response. Set it only to an endpoint you explicitly trust, because the API key is sent there. It must be HTTPS, contain no user information, query, or fragment, and trailing slashes are removed. Plain HTTP is accepted only for loopback test servers. The same variable can be placed in a supported environment file, but an environment value has highest precedence.
+`HEVY_API_BASE_URL` is never discovered from Swagger or a response. Set it only to an endpoint you explicitly trust, because the API key is sent there. It must be HTTPS, contain no user information, query, or fragment, and trailing slashes are removed. Plain HTTP is accepted only for loopback test servers. It is read only from the environment, never from a file, so no file can send the key elsewhere.
 
 TLS certificates are checked against a built-in set of public roots, not the system trust store, so a TLS-intercepting corporate proxy is not supported. Proxy environment variables (`HTTPS_PROXY`, `ALL_PROXY`, ...) are ignored on purpose: the API key is only ever sent directly to the base URL.
 

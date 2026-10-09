@@ -17,7 +17,7 @@ Bump `version` in `Cargo.toml` (the lockfile follows), merge to `main`, then tag
 
 ## Invariants
 
-- Never commit or print API keys, real Hevy IDs, or personal health/workout data; `.env` and credential files remain local and mode `0600`. Gitleaks (`.gitleaks.toml`, pre-commit hooks, `.github/workflows/security.yml`) scans every commit; a finding is fixed, never allowlisted to get past it.
+- Never commit or print API keys, real Hevy IDs, or personal health/workout data; credential files remain local and mode `0600`. The CLI reads the key only from `HEVY_API_KEY` or the stored `~/.config/hevy-axi/credentials.env`, and the base URL only from `HEVY_API_BASE_URL`; never add a project `.env` or other file source. Gitleaks (`.gitleaks.toml`, pre-commit hooks, `.github/workflows/security.yml`) scans every commit; a finding is fixed, never allowlisted to get past it.
 - Never add response, health-data, or synchronization caches. Commands read live state and redact credentials from failures.
 - Never add Node, pnpm, TypeScript, or other runtime dependencies: the binary stays self-contained. This repository contains no JavaScript. macOS and Linux only.
 - Treat the Hevy API as unstable: responses are read as plain JSON with tolerant envelope handling, not rigid types. Re-check the official contract before release; see `docs/hevy-api-analysis.md`.

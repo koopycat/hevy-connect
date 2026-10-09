@@ -276,23 +276,29 @@ fn the_base_url_must_be_https_unless_it_is_local() {
 }
 
 #[test]
-fn a_key_from_the_environment_cannot_be_redirected_by_a_project_env_file() {
+fn a_project_env_file_is_never_read() {
     let mock = Mock::start(|_| Reply::json(200, &json!({ "data": {} })));
     let cli = Cli::new().with_env("HEVY_API_BASE_URL", &mock.url);
     cli.file(
         ".env",
         "HEVY_API_KEY=file-key\nHEVY_API_BASE_URL=https://evil.example\n",
-        0o600,
+        0o644,
     );
     let output = cli.run(&["user", "info", "--json"]);
     assert_eq!(output.code, 0, "{}", output.stdout);
     assert_eq!(mock.requests()[0].headers["api-key"], KEY);
+
+    let cli = cli.without_key();
+    assert_eq!(
+        cli.run(&["setup", "status", "--json"]).json()["configured"],
+        false
+    );
 }
 
 #[test]
-fn credential_files_must_be_private_regular_files() {
+fn the_stored_credential_file_must_be_private_and_regular() {
     let cli = Cli::new().without_key();
-    cli.file(".env", "HEVY_API_KEY=k\n", 0o644);
+    let path = cli.stored_credentials("HEVY_API_KEY=k\n", 0o644);
     let output = cli.run(&["setup", "status", "--json"]);
     assert_eq!(
         (output.code, error_of(&output)["code"].clone()),
@@ -300,17 +306,10 @@ fn credential_files_must_be_private_regular_files() {
     );
     assert!(!output.stdout.contains("HEVY_API_KEY=k"));
 
-    // An unrelated .env is ignored whatever its mode.
-    cli.file(".env", "OTHER=1\n", 0o644);
-    assert_eq!(
-        cli.run(&["setup", "status", "--json"]).json()["configured"],
-        false
-    );
-
     // A symbolic link is refused even when it points at a private file.
     let target = cli.file("real.env", "HEVY_API_KEY=k\n", 0o600);
-    std::fs::remove_file(cli.project().join(".env")).unwrap();
-    std::os::unix::fs::symlink(&target, cli.project().join(".env")).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink(&target, &path).unwrap();
     let output = cli.run(&["setup", "status", "--json"]);
     assert_eq!(
         (output.code, error_of(&output)["message"].clone()),
@@ -325,18 +324,18 @@ fn credential_sources_are_reported_by_category_never_by_path_or_value() {
         cli.run(&["setup", "status", "--json"]).json()["credentialSource"],
         Value::Null
     );
-    cli.file(".env", "HEVY_API_KEY=project-secret\n", 0o600);
+    cli.stored_credentials("HEVY_API_KEY=\"stored-secret\"\n", 0o600);
     let status = cli.run(&["setup", "status", "--json"]);
-    assert_eq!(status.json()["credentialSource"], "project");
+    assert_eq!(status.json()["credentialSource"], "global");
     assert!(
-        !status.stdout.contains("project-secret")
-            && !status.stdout.contains(&cli.project().display().to_string())
+        !status.stdout.contains("stored-secret")
+            && !status.stdout.contains(&cli.home().display().to_string())
     );
-    cli.file("named.env", "export HEVY_API_KEY='named'\n", 0o600);
-    let named = cli
-        .with_env("HEVY_AXI_ENV_FILE", "named.env")
+    let status = cli
+        .with_env("HEVY_API_KEY", "env-secret")
         .run(&["setup", "status", "--json"]);
-    assert_eq!(named.json()["credentialSource"], "explicit");
+    assert_eq!(status.json()["credentialSource"], "environment");
+    assert!(!status.stdout.contains("env-secret"));
 }
 
 #[test]

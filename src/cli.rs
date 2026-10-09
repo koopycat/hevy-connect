@@ -233,7 +233,7 @@ fn home(env: &Environment, exe: &Path) -> Result<String> {
         json!({
             "status": "configured",
             "configured": true,
-            "credentialSource": config.credential_category(env),
+            "credentialSource": config.credential_category(),
             "help": ["hevy-axi workout list", "hevy-axi routine list", "hevy-axi exercise list", "hevy-axi user info"],
         })
     };
