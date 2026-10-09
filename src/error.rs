@@ -1,7 +1,6 @@
 //! The single error type. Every failure reaches the user as a structured error
 //! with a stable code, a message, and optional suggestions and details.
 
-use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use serde_json::{Map, Value, json};
@@ -131,11 +130,3 @@ impl Error {
         json!({ "error": error })
     }
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.code.as_str(), self.message)
-    }
-}
-
-impl std::error::Error for Error {}
