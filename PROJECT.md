@@ -13,7 +13,7 @@ Determine whether Hevy's early Public API is sufficient for safe, agent-ergonomi
 ## Outcome
 
 - Completed a deep analysis of the official OpenAPI contract: 14 paths, 22 operations, authentication, pagination, mutation semantics, inconsistencies, and API risks are recorded in `docs/hevy-api-analysis.md`.
-- Built `hevy-axi`, a full CLI for all 22 operations (first in TypeScript, then ported to a single native Rust binary for easier distribution, verified byte-identical against the original on 280 scenarios), with compact TOON output, JSON and field projection, bounded pagination, structured errors, secure credential resolution, explicit mutation confirmation and dry runs, and optional ambient agent hooks.
+- Built `hevy-axi`, a full CLI for all 22 operations (first in TypeScript, then ported to a single native Rust binary for easier distribution, verified byte-identical against the original on 280 scenarios), with compact TOON output, JSON and field projection, bounded pagination, structured errors, secure credential resolution, and explicit mutation confirmation and dry runs.
 - Safety behavior includes no POST/PUT retries, full-state handling for replacement writes, read-merge-write measurement updates, credential redaction, and no response or health-data cache.
 - Validation is comprehensive and currently passes `just check`; use that canonical command rather than relying on a fixed test count.
 - Observed live deviations are handled defensively: workout events requested without `since` can arrive under a `workouts` envelope, and routine folders can arrive under the legacy `routines` envelope instead of documented keys.

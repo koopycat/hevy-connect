@@ -409,48 +409,6 @@ fn a_stored_key_is_written_privately_read_from_stdin_only_and_removable() {
 }
 
 #[test]
-fn hooks_are_installed_listed_and_removed_without_touching_other_entries() {
-    let cli = Cli::new();
-    let settings = cli.home().join(".claude/settings.json");
-    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
-    std::fs::write(&settings, r#"{"theme":"dark","hooks":{"SessionStart":[{"matcher":"x","hooks":[{"type":"command","command":"other"}]}]}}"#).unwrap();
-
-    assert_eq!(
-        cli.run(&["setup", "hooks", "--json"]).code,
-        2,
-        "needs --confirm"
-    );
-    let installed = cli.run(&["setup", "hooks", "--confirm", "--json"]).json();
-    assert_eq!(
-        installed["hooks"],
-        json!({ "scope": "user", "claude": true, "codex": true, "opencode": true })
-    );
-    let text = std::fs::read_to_string(&settings).unwrap();
-    assert!(
-        text.contains("\"theme\": \"dark\"")
-            && text.contains("\"command\": \"other\"")
-            && text.contains("hevy-axi")
-    );
-    assert_eq!(
-        cli.run(&["setup", "status", "--json"]).json()["hooks"]["claude"],
-        true
-    );
-
-    let removed = cli
-        .run(&["setup", "remove-hooks", "--confirm", "--json"])
-        .json();
-    assert_eq!(
-        removed["hooks"],
-        json!({ "scope": "user", "claude": false, "codex": false, "opencode": false })
-    );
-    let after: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-    assert_eq!(
-        after,
-        json!({ "theme": "dark", "hooks": { "SessionStart": [{ "matcher": "x", "hooks": [{ "type": "command", "command": "other" }] }] } })
-    );
-}
-
-#[test]
 fn update_only_reports_and_never_touches_the_network() {
     let output = Cli::new()
         .without_key()

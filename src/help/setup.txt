@@ -1,19 +1,15 @@
 Usage: hevy-axi setup <action> [flags]
 
 Actions:
-  status              Show credential category, base URL, and hook status
+  status              Show credential category and base URL
   key                 Read an API key only from stdin and store it globally
   remove-key          Remove the globally stored API key
-  hooks               Install AXI SessionStart hooks
-  remove-hooks        Remove AXI SessionStart hooks
 
 Flags:
-  --confirm            Required for key/remove-key/hooks/remove-hooks
+  --confirm            Required for key/remove-key
 {{COMMON}}
 
 Examples:
   printf '%s\n' "$HEVY_API_KEY" | hevy-axi setup key --confirm
   hevy-axi setup status --json
   hevy-axi setup remove-key --confirm
-  hevy-axi setup hooks --confirm
-  hevy-axi setup remove-hooks --confirm

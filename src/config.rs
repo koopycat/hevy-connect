@@ -59,10 +59,6 @@ impl Environment {
         nonblank(self.vars.get(name).map(String::as_str))
     }
 
-    pub fn path_variable(&self) -> Option<&str> {
-        self.vars.get("PATH").map(String::as_str)
-    }
-
     pub fn stored_credentials_path(&self) -> PathBuf {
         self.home.join(STORED_CREDENTIALS)
     }

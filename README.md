@@ -73,10 +73,10 @@ Every resource supports `--help`. These actions map to the complete documented A
 | `exercise`    | `list`, `create`, `view <id>`, `history <id>`                   | 3 exercise-template operations plus exercise history              |
 | `folder`      | `list`, `create`, `view <id>`                                   | 3 routine-folder operations                                       |
 | `measurement` | `list`, `create`, `view <YYYY-MM-DD>`, `update <YYYY-MM-DD>`    | 4 body-measurement operations                                     |
-| `setup`       | `status`, `key`, `remove-key`, `hooks`, `remove-hooks`          | Local credential and ambient-context setup; no Hevy API operation |
+| `setup`       | `status`, `key`, `remove-key`                                     | Local credential setup; no Hevy API operation |
 | `update`      | `--check`                                                       | Read-only manual checkout update instructions                     |
 
-Running `hevy-axi` with no arguments shows the home view: whether a key is configured, its credential source, and next commands. It makes no API call and shows no account or workout data, because the optional SessionStart hooks inject it into every agent session.
+Running `hevy-axi` with no arguments shows the home view: whether a key is configured, its credential source, and next commands. It makes no API call and shows no account or workout data, so it is safe to run at the start of every agent session.
 
 ## Output, fields, and pagination
 
@@ -148,18 +148,7 @@ Unknown commands and flags fail loudly. Requests time out after 20 seconds, succ
 
 ## Ambient agent context
 
-After linking or otherwise placing `hevy-axi` on `PATH`, opt in to managed SessionStart integration:
-
-```bash
-hevy-axi setup hooks --confirm
-hevy-axi setup status
-```
-
-This installs user-scoped integration for Claude Code and Codex and an OpenCode ambient-context plugin. It runs the home view once at session start. That view makes no API call and contains only configuration status and next commands, never the API key, account, or workout data. Installation is explicit and does not run during ordinary commands. Remove only the managed entries with:
-
-```bash
-hevy-axi setup remove-hooks --confirm
-```
+To show agents whether Hevy is configured at the start of a session, run `hevy-axi` with no arguments from your own SessionStart hook. The home view makes no API call and contains only configuration status and next commands, never the API key, account, or workout data. `hevy-axi` does not install hooks itself.
 
 ## Configuration
 

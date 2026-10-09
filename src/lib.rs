@@ -8,7 +8,6 @@ mod config;
 mod error;
 mod fsutil;
 mod help;
-mod hooks;
 mod input;
 mod list;
 mod mutate;

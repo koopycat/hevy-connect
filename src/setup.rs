@@ -1,21 +1,15 @@
-//! `setup`: local credential and ambient-context management. No Hevy API call.
+//! `setup`: local credential management. No Hevy API call.
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::args::Parsed;
 use crate::config::{self, Environment};
-use crate::error::{Code, Error, Result};
-use crate::hooks;
+use crate::error::{Error, Result};
 use crate::input::read_stdin;
 use crate::output::OutputOptions;
 
 pub const SETUP_KEY_COMMAND: &str =
     "printf '%s\\n' \"$HEVY_API_KEY\" | hevy-axi setup key --confirm";
-
-pub fn hooks_status(env: &Environment) -> Value {
-    let status = hooks::status(env);
-    json!({ "scope": "user", "claude": status.claude, "codex": status.codex, "opencode": status.opencode })
-}
 
 /// A key piped in as `KEY`, `HEVY_API_KEY=KEY`, or either one quoted.
 fn clean_key(input: &str) -> &str {
@@ -65,7 +59,6 @@ pub fn run(
                 "configured": config.api_key.is_some(),
                 "credentialSource": config.credential_category(env),
                 "baseUrl": config.base_url.as_str(),
-                "hooks": hooks_status(env),
                 "help": help,
             })
         }
@@ -82,22 +75,6 @@ pub fn run(
         "remove-key" => {
             require_confirm()?;
             json!({ "status": config::remove_stored_api_key(env)?, "credentialSource": "global" })
-        }
-        "hooks" => {
-            require_confirm()?;
-            let exe = std::env::current_exe().map_err(|_| {
-                Error::new(
-                    Code::Config,
-                    "The path of this executable could not be determined.",
-                )
-            })?;
-            hooks::install(env, &exe)?;
-            json!({ "status": "installed", "hooks": hooks_status(env) })
-        }
-        "remove-hooks" => {
-            require_confirm()?;
-            hooks::uninstall(env)?;
-            json!({ "status": "removed", "hooks": hooks_status(env) })
         }
         other => return Err(Error::validation(format!("Unknown setup action: {other}."))),
     };

@@ -217,7 +217,7 @@ fn update_command(exe: &Path, args: &[String]) -> Result<String> {
 }
 
 /// The home view: local configuration only, with no API call and no account or
-/// workout data, because SessionStart hooks inject it into every agent session.
+/// workout data, so it is safe to inject into an agent session.
 fn home(env: &Environment, exe: &Path) -> Result<String> {
     let config = config::resolve(env)?;
     let mut view = Map::new();
