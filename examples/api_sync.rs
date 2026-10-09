@@ -17,7 +17,6 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 const SOURCE_URL: &str = "https://api.hevyapp.com/docs/swagger-ui-init.js";
 const MARKER: &str = "\"swaggerDoc\": ";
@@ -74,50 +73,6 @@ fn extract_swagger_doc(script: &str) -> Result<&str, String> {
     Ok(text)
 }
 
-/// Human-readable lines for how the contract changed: `+` added, `-` removed,
-/// `~` changed, for both paths and schemas.
-fn describe_changes(committed: &str, live: &str) -> Result<Vec<String>, serde_json::Error> {
-    let (before, after): (Value, Value) = (
-        serde_json::from_str(committed)?,
-        serde_json::from_str(live)?,
-    );
-    let mut lines = Vec::new();
-    for (kind, pointer) in [("path", "/paths"), ("schema", "/components/schemas")] {
-        let empty = serde_json::Map::new();
-        let old = before
-            .pointer(pointer)
-            .and_then(Value::as_object)
-            .unwrap_or(&empty);
-        let new = after
-            .pointer(pointer)
-            .and_then(Value::as_object)
-            .unwrap_or(&empty);
-        lines.extend(
-            new.keys()
-                .filter(|key| !old.contains_key(*key))
-                .map(|key| format!("+ {kind} {key}")),
-        );
-        for (key, value) in old {
-            match new.get(key) {
-                None => lines.push(format!("- {kind} {key}")),
-                Some(other) if other != value => lines.push(format!("~ {kind} {key}")),
-                Some(_) => {}
-            }
-        }
-    }
-    if lines.is_empty() {
-        lines.push("Only formatting or ordering changed.".into());
-    }
-    Ok(lines)
-}
-
-fn sha256(text: &str) -> String {
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 fn fetch_live_script() -> Result<String, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(20)))
@@ -145,29 +100,20 @@ fn run(check_only: bool) -> Result<bool, String> {
         .map_err(|error| format!("Reading {}: {error}.", path.display()))?;
 
     if live == committed {
-        println!(
-            "docs/hevy-openapi.json matches the live docs (sha256 {}).",
-            sha256(live)
-        );
+        println!("docs/hevy-openapi.json matches the live docs.");
         return Ok(true);
     }
-    println!(
-        "Live contract differs from the committed capture (sha256 {}):",
-        sha256(live)
-    );
-    for line in describe_changes(&committed, live).map_err(|error| error.to_string())? {
-        println!("  {line}");
-    }
+    println!("The live contract differs from the committed capture.");
     if check_only {
         eprintln!(
-            "Run `just api-sync` to adopt the change, then review docs/hevy-api-analysis.md."
+            "Run `just api-sync` to adopt the change, review it with `git diff docs`, then run `just check`."
         );
         return Ok(false);
     }
     std::fs::write(&path, live).map_err(|error| format!("Writing {}: {error}.", path.display()))?;
     println!("Wrote docs/hevy-openapi.json.");
     println!(
-        "Next: update the SHA and capture date in docs/hevy-api-analysis.md and AGENTS.md, then run `just check`."
+        "Next: review `git diff docs`, update the capture date in docs/hevy-api-analysis.md and AGENTS.md, then run `just check`."
     );
     Ok(true)
 }
@@ -238,26 +184,6 @@ mod tests {
             extract_swagger_doc("\"swaggerDoc\": {\"a\": 1")
                 .unwrap_err()
                 .contains("Unbalanced")
-        );
-    }
-
-    #[test]
-    fn describes_added_removed_and_changed_paths_and_schemas() {
-        let before = serde_json::json!({ "paths": { "/a": { "get": 1 }, "/b": {} }, "components": { "schemas": { "S": { "x": 1 }, "T": {} } } }).to_string();
-        let after = serde_json::json!({ "paths": { "/a": { "get": 2 }, "/c": {} }, "components": { "schemas": { "S": { "x": 1 }, "U": {} } } }).to_string();
-        assert_eq!(
-            describe_changes(&before, &after).unwrap(),
-            [
-                "+ path /c",
-                "~ path /a",
-                "- path /b",
-                "+ schema U",
-                "- schema T"
-            ]
-        );
-        assert_eq!(
-            describe_changes(&before, &before).unwrap(),
-            ["Only formatting or ordering changed."]
         );
     }
 }

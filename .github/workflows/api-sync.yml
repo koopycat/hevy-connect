@@ -1,4 +1,4 @@
-name: Sync Hevy API
+name: Check Hevy API
 
 on:
   schedule:
@@ -6,21 +6,15 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
-# No token permissions by default. Each job requests only what it needs.
-permissions: {}
-
-concurrency:
-  group: api-sync
-  cancel-in-progress: false
+permissions:
+  contents: read
 
 jobs:
-  # Runs project code (cargo, just check) and reads third-party data. It holds
-  # no write credential, and its checkout does not persist one.
-  refresh:
+  # Fails when Hevy's live OpenAPI document differs from the committed capture.
+  # The failed run is the alert: adopt the change locally with `just api-sync`.
+  check:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -28,37 +22,4 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
 
-      - run: scripts/api-sync-refresh.sh "${{ runner.temp }}/api-sync"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: api-sync
-          path: ${{ runner.temp }}/api-sync
-          if-no-files-found: error
-          retention-days: 7
-
-  # Holds the write token. Runs only the repository's own git and gh scripts,
-  # from the default branch, on the output of the refresh job.
-  publish:
-    needs: refresh
-    # Pinned to one image instead of ubuntu-latest, so an image change never
-    # reaches this write-token job unreviewed. Renovate proposes the bumps.
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          # Always the default branch, even when dispatched from another branch.
-          ref: ${{ github.event.repository.default_branch }}
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: api-sync
-          path: ${{ runner.temp }}/api-sync
-
-      - run: scripts/api-sync-publish.sh "${{ runner.temp }}/api-sync"
+      - run: just api-sync-check
