@@ -18,7 +18,7 @@ env:
 jobs:
   test:
     name: Test release
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - name: Validate release tag
@@ -117,7 +117,7 @@ jobs:
   release:
     name: Publish GitHub release
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -194,7 +194,7 @@ jobs:
     name: Update Homebrew formula
     needs: release
     if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Create Homebrew tap token
