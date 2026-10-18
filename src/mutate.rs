@@ -303,12 +303,12 @@ pub fn run(
 ) -> Result<String> {
     let submission = Submission::read(env, parsed)?;
     let body = prepare_body(spec, submission.input.clone(), update)?;
-    let checks_title = spec.name == "exercise" && !update;
+    let creates_exercise = spec.name == "exercise" && !update;
     let mut out = submission.outcome(if update { "PUT" } else { "POST" }, path, update);
     out.extend(semantics(spec, update));
 
     if submission.dry_run {
-        if checks_title {
+        if creates_exercise {
             // Dry-run stays offline, so the title check runs only on --confirm.
             out.push((
                 "duplicateCheck",
@@ -329,7 +329,7 @@ pub fn run(
     }
 
     let client = Client::configured(env)?;
-    if checks_title {
+    if creates_exercise {
         let allow_duplicate = parsed.switch("allow-duplicate");
         let check = check_exercise_title_unique(&client, &body, allow_duplicate)?;
         out.push(("duplicateCheck", check));
@@ -339,8 +339,44 @@ pub fn run(
     } else {
         client.post(path, &body)?
     };
+    if creates_exercise {
+        let id = created_exercise_id(&response);
+        let next = match &id {
+            Some(id) => format!("hevy-axi exercise view {}", shell_argument(id)),
+            None => "hevy-axi exercise list --all --fields id,title".to_owned(),
+        };
+        out.push(("id", id.map_or(Value::Null, Value::from)));
+        out.push(("help", json!([next])));
+    }
     out.push(("result", response));
     options.render_projected(to_object(out))
+}
+
+/// The new template's ID as a string, or `None` if the response holds no
+/// usable one. Hevy documents `{"id": <integer>}`, but has also answered with
+/// the bare ID as text and with that JSON object inside a string.
+fn created_exercise_id(response: &Value) -> Option<String> {
+    match response {
+        Value::Object(map) => match map.get("id")? {
+            Value::String(id) => plain_id(id),
+            id => safe_integer(Some(id)).map(|id| id.to_string()),
+        },
+        // Only unwrap text that looks like JSON: an ID such as `1e10` would
+        // otherwise parse as a number.
+        Value::String(text) if text.trim_start().starts_with(['{', '"']) => {
+            created_exercise_id(&serde_json::from_str(text).ok()?)
+        }
+        Value::String(text) => plain_id(text.trim()),
+        id => safe_integer(Some(id)).map(|id| id.to_string()),
+    }
+}
+
+fn plain_id(id: &str) -> Option<String> {
+    let plain = !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    plain.then(|| id.to_owned())
 }
 
 fn normalize_title(title: &str) -> String {
@@ -676,6 +712,34 @@ mod tests {
                     "{request} requires {resource}.{name}, which the rules do not"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_created_exercise_id_is_read_from_every_observed_response_shape() {
+        let uuid = "123e4567-e89b-12d3-a456-426614174000";
+        let id = |response: Value| created_exercise_id(&response);
+        assert_eq!(id(json!({ "id": 123 })).as_deref(), Some("123"));
+        assert_eq!(id(json!({ "id": uuid })).as_deref(), Some(uuid));
+        assert_eq!(id(json!(uuid)).as_deref(), Some(uuid));
+        assert_eq!(id(json!(format!(" {uuid}\n"))).as_deref(), Some(uuid));
+        assert_eq!(id(json!("1e10")).as_deref(), Some("1e10"));
+        assert_eq!(id(json!(42)).as_deref(), Some("42"));
+        assert_eq!(id(json!(r#"{"id":7}"#)).as_deref(), Some("7"));
+        assert_eq!(id(json!(format!("\"{uuid}\""))).as_deref(), Some(uuid));
+        for unusable in [
+            json!({}),
+            json!({ "id": null }),
+            json!({ "id": 1.5 }),
+            json!({ "id": -1 }),
+            json!({ "id": "" }),
+            json!({ "id": r#"{"id":7}"# }),
+            json!("not an id"),
+            json!("{broken"),
+            json!(null),
+            json!([uuid]),
+        ] {
+            assert_eq!(id(unusable.clone()), None, "{unusable}");
         }
     }
 }

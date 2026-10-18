@@ -121,6 +121,7 @@ Mutation input may also come from stdin with `--file -`. It must be a JSON objec
 - PUT requests are also **never retried**. Workout updates use the complete workout write shape, and callers should treat routine updates as complete intended state because Hevy offers no revisions or conditional writes.
 - Hevy defines measurement PUT as full replacement, where omitted values become null. The CLI protects partial updates by reading the existing date, merging supplied fields, and sending the resulting complete measurement; an explicit `null` clears a metric. Concurrent external edits can still be overwritten.
 - Folder creation changes folder order by inserting the new folder first.
+- A confirmed `exercise create` reports the new template's ID as the string field `id`, read from whichever response shape Hevy sends, and a `help` command to read it back. If the response holds no usable ID, `id` is `null`; the template may still exist, so find it by title instead of creating it again.
 - The public API exposes no delete commands. Delete in Hevy itself where supported.
 - The CLI keeps no response, health, or synchronization cache. Each command reads live state.
 - GET requests alone may retry selected network, rate-limit, and transient gateway failures, at most twice. POST and PUT never retry.

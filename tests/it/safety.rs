@@ -770,6 +770,57 @@ fn the_duplicate_check_fails_closed_when_it_cannot_finish() {
         json!({ "performed": true, "matchesFound": 0, "overridden": false })
     );
     assert_eq!(created["result"], json!({ "id": 9 }));
+    assert_eq!(created["id"], json!("9"));
+}
+
+#[test]
+fn a_created_exercise_reports_its_id_and_how_to_read_it_back() {
+    let uuid = "123e4567-e89b-12d3-a456-426614174000";
+    let created = |reply: fn() -> Reply| {
+        let mock = Mock::start(move |request| {
+            if request.method == "POST" {
+                reply()
+            } else {
+                Reply::json(200, &templates(&[("a", "Squat")], 1, 1))
+            }
+        });
+        let output = Cli::against(&mock).run_with_stdin(
+            &["exercise", "create", "--file", "-", "--confirm", "--json"],
+            EXERCISE,
+        );
+        assert_eq!(output.code, 0, "{}", output.stdout);
+        output.json()
+    };
+
+    // Hevy has answered with the bare ID as text instead of `{"id": ...}`.
+    let bare = created(|| Reply::text(200, "123e4567-e89b-12d3-a456-426614174000"));
+    assert_eq!(
+        (
+            bare["id"].clone(),
+            bare["help"].clone(),
+            bare["result"].clone()
+        ),
+        (
+            json!(uuid),
+            json!([format!("hevy-axi exercise view {uuid}")]),
+            json!(uuid)
+        )
+    );
+
+    // A success without a usable ID still reports success, never a guess.
+    let unknown = created(|| Reply::json(200, &json!({})));
+    assert_eq!(
+        (
+            unknown["status"].clone(),
+            unknown["id"].clone(),
+            unknown["help"].clone()
+        ),
+        (
+            json!("success"),
+            Value::Null,
+            json!(["hevy-axi exercise list --all --fields id,title"])
+        )
+    );
 }
 
 #[test]

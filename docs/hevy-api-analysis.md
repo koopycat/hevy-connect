@@ -119,7 +119,7 @@ There is no uniform data envelope:
 - Lists: `{page,page_count,<plural-array>}`.
 - Workout create: `{workout:[...]}`; workout get/update: raw `Workout`.
 - Routine create/get/update: `{routine:{...}}`.
-- Template create: `{id}`; template get: raw object.
+- Template create: `{id}`; template get: raw object. Observed 2026-10-18: a live create answered with the bare template UUID string instead of `{id: integer}`.
 - Folder create/get: raw object.
 - User: `{data:{...}}`; history: `{exercise_history:[...]}`; count: `{workout_count}`.
 - Measurement create is explicitly bodyless; measurement update has no response schema. A successful client must not require JSON for either.
