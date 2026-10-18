@@ -6,6 +6,8 @@
 /.direnv/
 /devenv.local.nix
 /devenv.local.yaml
+/.agents/skills/
+/.claude/skills/
 .research/
 .data/
 *.log

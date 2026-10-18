@@ -15,6 +15,10 @@ devenv shell -- just check
 
 Bump `version` in `Cargo.toml` (the lockfile follows), merge to `main`, then tag that commit `vX.Y.Z` and push the tag. `release.yml` refuses a tag whose core version differs from `Cargo.toml`, runs `just check`, builds darwin and linux archives for arm64 and amd64 on native runners, publishes the GitHub release with `checksums.txt`, and writes `Formula/hevy-axi.rb` in `koopycat/homebrew-tap` through the `HOMEBREW_APP_ID` and `HOMEBREW_APP_PRIVATE_KEY` secrets. A tag with a prerelease suffix (`v0.2.0-rc.1`) publishes a prerelease and leaves the tap alone. The binary's `--version` output is the bare version and the formula test asserts it.
 
+## Skill
+
+`skills/hevy-add-exercise` is the only copy of the agent skill that drives this CLI; change it here, together with any CLI behavior it relies on. `~/src/inkubator/my_agents/skills/hevy-add-exercise` is a symlink to it, and `.agents-skills.toml` selects it for this project. `my_agents/bin/agents-sync` creates the ignored links in `.claude/skills/` and `.agents/skills/`; never copy the skill elsewhere.
+
 ## Invariants
 
 - Never commit or print API keys, real Hevy IDs, or personal health/workout data; credential files remain local and mode `0600`. The CLI reads the key only from `HEVY_API_KEY` or the stored `~/.config/hevy-axi/credentials.env`, and the base URL only from `HEVY_API_BASE_URL`; never add a project `.env` or other file source. Gitleaks (`.gitleaks.toml`, pre-commit hooks, `.github/workflows/security.yml`) scans every commit; a finding is fixed, never allowlisted to get past it.

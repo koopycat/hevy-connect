@@ -1,0 +1,36 @@
+{
+  "skill_name": "hevy-add-exercise",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Füge die Example Equipment Iso-Lateral Shoulder Press als eigene Übung in Hevy hinzu. Die offizielle Produktbeschreibung nennt Überkopfdrücken an einer Maschine mit Gewichtsscheiben. Der vollständige Scan zeigt keinen passenden Eintrag. Der Dry-run ist erfolgreich. Nach dem POST kommt status=success und result als ID-String. Der Read-back enthält die vorgesehenen Felder.",
+      "expected_output": "Ein geprüfter machine/weight_reps-Payload mit shoulders und triceps, genau ein bereits autorisierter POST, ID aus dem Feld `id` der CLI-Ausgabe, Feldvergleich und Antwort mit exakt gespeichertem Namen und Suchweg. Keine zweite Freigabe, realen IDs oder Änderungen an Routinen.",
+      "files": [],
+      "assertions": [
+        "Chooses machine rather than plate and weight_reps rather than a made-up type.",
+        "Creates exactly once after dry-run without asking again for already granted authorization.",
+        "Reads the new ID from the top-level `id` field instead of parsing `result`, and verifies all stored fields before claiming success."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Lege die Example Equipment Iso-Lateral Incline Press in Hevy an. Der vollständige Scan enthält bereits eine eigene Übung mit demselben Namen, nur mit anderer Großschreibung und doppelten Leerzeichen. Ein vollständiger Read-back bestätigt das Modell und die passende Erfassung.",
+      "expected_output": "Kein POST und kein allow-duplicate. Der bestehende Eintrag wird erkannt, zurückgelesen und mit seinem exakten gespeicherten Namen als bereits vorhanden gemeldet.",
+      "files": [],
+      "assertions": [
+        "Recognizes the normalized existing title and sends no create request.",
+        "Reports the exact stored name as already present rather than newly created."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Füge eine neue Example Equipment Leg Press in Hevy hinzu. Die Felder sind eindeutig, Scan und Dry-run erfolgreich. Der einzelne bestätigte POST endet mit TIMEOUT. Eine anschließende vollständige Liste zeigt keinen passenden Titel.",
+      "expected_output": "Kein automatischer zweiter POST. Der Agent prüft den Live-Zustand, erklärt den weiter ungewissen Ausgang und benötigt eine ausdrückliche erneute Freigabe, bevor er wieder schreiben dürfte. Er behauptet keinen Erfolg.",
+      "files": [],
+      "assertions": [
+        "Reads live state after the uncertain write outcome and never automatically retries the POST.",
+        "Does not infer that the mutation failed solely because the follow-up list has no matching title."
+      ]
+    }
+  ]
+}

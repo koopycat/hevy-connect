@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hevy-Übung hinzufügen"
+  short_description: "Eigene Geräteübungen mit hevy-axi anlegen"
+  default_prompt: "Verwende $hevy-add-exercise, um dieses Gerät als eigene Übung in Hevy anzulegen: [Produkt-URL oder Gerätename]."
