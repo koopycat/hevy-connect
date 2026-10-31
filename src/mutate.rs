@@ -42,65 +42,59 @@ const MEASUREMENT_FIELDS: [&str; 17] = [
     "right_calf",
 ];
 
-#[derive(Clone, Copy, PartialEq)]
-enum Presence {
-    Required,
-    /// Required for a full replacement, optional when creating.
-    RequiredOnUpdate,
-}
+/// Envelope, label, create requirements, additional update requirements.
+/// Only workout's create fields are required by Hevy's spec; all other fields
+/// are CLI policy. Hevy does not document workout/routine PUT replacement behavior.
+type BodyShape = (
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+);
 
-/// A field a request body must contain. Values are left for Hevy to judge.
-struct Rule {
-    field: &'static str,
-    presence: Presence,
-}
-
-const fn rule(field: &'static str, presence: Presence) -> Rule {
-    Rule { field, presence }
-}
-
-use Presence::{Required, RequiredOnUpdate};
-
-/// How each resource's request body is wrapped and which fields it must have.
-/// A full replacement must name every field it would otherwise clear.
-fn body_shape(spec: &Spec) -> Option<(&'static str, &'static str, &'static [Rule])> {
-    const WORKOUT: [Rule; 5] = [
-        rule("title", Required),
-        rule("start_time", Required),
-        rule("end_time", Required),
-        rule("description", RequiredOnUpdate),
-        rule("exercises", Required),
-    ];
-    const ROUTINE: [Rule; 4] = [
-        rule("title", Required),
-        rule("folder_id", RequiredOnUpdate),
-        rule("notes", RequiredOnUpdate),
-        rule("exercises", Required),
-    ];
-    const EXERCISE: [Rule; 5] = [
-        rule("title", Required),
-        rule("exercise_type", Required),
-        rule("equipment_category", Required),
-        rule("muscle_group", Required),
-        rule("other_muscles", Required),
-    ];
-    const FOLDER: [Rule; 1] = [rule("title", Required)];
+fn body_shape(spec: &Spec) -> Option<BodyShape> {
     match spec.name {
-        "workout" => Some(("workout", "Workout", &WORKOUT)),
-        "routine" => Some(("routine", "Routine", &ROUTINE)),
-        "exercise" => Some(("exercise", "Exercise", &EXERCISE)),
-        "folder" => Some(("routine_folder", "Routine folder", &FOLDER)),
+        "workout" => Some((
+            "workout",
+            "Workout",
+            &["title", "start_time", "end_time", "exercises"],
+            &["description", "is_private"],
+        )),
+        // Routine create requirements are CLI policy, not OpenAPI requirements.
+        "routine" => Some((
+            "routine",
+            "Routine",
+            &["title", "exercises"],
+            &["folder_id", "notes"],
+        )),
+        // The exercise spec has no valid required-properties list; require
+        // these locally (the duplicate-title check also needs a title).
+        "exercise" => Some((
+            "exercise",
+            "Exercise",
+            &[
+                "title",
+                "exercise_type",
+                "equipment_category",
+                "muscle_group",
+                "other_muscles",
+            ],
+            &[],
+        )),
+        // The folder spec does not mark title required.
+        "folder" => Some(("routine_folder", "Routine folder", &["title"], &[])),
         _ => None,
     }
 }
 
 /// The request body for a wrapped resource: the input wrapped in its envelope
-/// (unless already wrapped), with every field its rules require.
+/// (unless already wrapped), with documented or policy-required fields.
 fn wrapped_body(
     input: Map<String, Value>,
     key: &str,
     description: &str,
-    rules: &[Rule],
+    create_fields: &[&str],
+    update_fields: &[&str],
     update: bool,
 ) -> Result<Value> {
     let inner = if input.contains_key(key) {
@@ -121,18 +115,22 @@ fn wrapped_body(
         input
     };
 
-    let required =
-        |rule: &Rule| rule.presence == Required || (rule.presence == RequiredOnUpdate && update);
-    let missing: Vec<&str> = rules
+    let missing: Vec<&str> = create_fields
         .iter()
-        .filter(|r| required(r) && !inner.contains_key(r.field))
-        .map(|r| r.field)
+        .chain(update_fields.iter().filter(|_| update))
+        .copied()
+        .filter(|field| !inner.contains_key(*field))
         .collect();
     if !missing.is_empty() {
         return Err(Error::validation(format!(
             "{description} is missing required field(s): {}.",
             missing.join(", ")
         )));
+    }
+    // Hevy defaults this optional field to false. Never let a workout update
+    // omit or send a malformed value that could change a private workout.
+    if update && key == "workout" && !inner["is_private"].is_boolean() {
+        return Err(Error::validation("Workout is_private must be a boolean."));
     }
     Ok(json!({ key: inner }))
 }
@@ -194,7 +192,14 @@ fn measurement_body(input: Map<String, Value>, update: bool) -> Result<Value> {
 /// The validated request body (for measurements, the bare fields).
 fn prepare_body(spec: &Spec, input: Map<String, Value>, update: bool) -> Result<Value> {
     match body_shape(spec) {
-        Some((key, description, rules)) => wrapped_body(input, key, description, rules, update),
+        Some((key, description, create_fields, update_fields)) => wrapped_body(
+            input,
+            key,
+            description,
+            create_fields,
+            update_fields,
+            update,
+        ),
         None => measurement_body(input, update),
     }
 }
@@ -277,7 +282,8 @@ fn to_object(fields: Vec<(&str, Value)>) -> Value {
     Value::Object(fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
 }
 
-/// Semantics worth stating explicitly, shared by previews and results.
+/// Mutation metadata shared by previews and results. `full_replacement`
+/// describes the CLI's required input, not a guarantee about Hevy's PUT behavior.
 fn semantics(spec: &Spec, update: bool) -> Vec<(&'static str, Value)> {
     if update {
         vec![("semantics", "full_replacement".into())]
@@ -601,12 +607,24 @@ mod tests {
     }
 
     #[test]
-    fn replacements_require_every_field_creations_fewer() {
+    fn updates_require_complete_intended_state_creations_fewer() {
         let create = json!({"title": "T", "start_time": "a", "end_time": "b", "exercises": []});
+        assert_eq!(
+            message(body("routine", json!({}), false)),
+            "Routine is missing required field(s): title, exercises."
+        );
         assert!(body("workout", create.clone(), false).is_ok());
         assert_eq!(
             message(body("workout", create, true)),
-            "Workout is missing required field(s): description."
+            "Workout is missing required field(s): description, is_private."
+        );
+        assert_eq!(
+            message(body(
+                "workout",
+                json!({"title": "T", "start_time": "a", "end_time": "b", "description": null, "exercises": []}),
+                true
+            )),
+            "Workout is missing required field(s): is_private."
         );
         assert_eq!(
             message(body(
@@ -686,7 +704,7 @@ mod tests {
     fn body_rules_agree_with_the_committed_openapi_capture() {
         use crate::spec::{properties, property, schema};
 
-        // Resource, then the request schema that decides its replacement body.
+        // Resource and request schema; only the workout has documented required fields.
         let bodies = [
             ("workout", "PostWorkoutsRequestBody"),
             ("routine", "PutRoutinesRequestBody"),
@@ -694,22 +712,33 @@ mod tests {
             ("folder", "PostRoutineFolderRequestBody"),
         ];
         for (resource, request) in bodies {
-            let (envelope, _, rules) = body_shape(find(resource).unwrap()).unwrap();
+            let (envelope, _, create_fields, update_fields) =
+                body_shape(find(resource).unwrap()).unwrap();
             let record = property(schema(request), envelope)
                 .unwrap_or_else(|| panic!("{request} has no {envelope}"));
             let documented = properties(record);
-            for rule in rules {
+            for field in create_fields.iter().chain(update_fields) {
                 assert!(
-                    documented.contains_key(rule.field),
-                    "{resource}.{} is not in {request}",
-                    rule.field
+                    documented.contains_key(*field),
+                    "{resource}.{field} is not in {request}"
                 );
             }
-            let required = record["required"].as_array().into_iter().flatten();
-            for name in required.filter_map(Value::as_str) {
+            let required: Vec<&str> = record["required"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            if resource == "workout" {
+                assert_eq!(required, create_fields, "workout requirements changed");
+                assert_eq!(
+                    record["properties"]["is_private"]["default"], false,
+                    "review workout update privacy policy if the API default changes"
+                );
+            } else {
                 assert!(
-                    rules.iter().any(|rule| rule.field == name),
-                    "{request} requires {resource}.{name}, which the rules do not"
+                    required.iter().all(|field| create_fields.contains(field)),
+                    "{request} requires a field the CLI does not check"
                 );
             }
         }

@@ -151,7 +151,7 @@ fn writes_are_never_retried() {
 
     let mock = Mock::start(|_| Reply::text(503, "no"));
     let cli = Cli::against(&mock);
-    cli.file("w.json", &json!({ "title": "T", "start_time": "a", "end_time": "b", "description": null, "exercises": [] }).to_string(), 0o600);
+    cli.file("w.json", &json!({ "title": "T", "start_time": "a", "end_time": "b", "description": null, "is_private": false, "exercises": [] }).to_string(), 0o600);
     let output = cli.run(&[
         "workout",
         "update",
@@ -527,7 +527,7 @@ fn a_confirmed_create_posts_the_enveloped_body_once() {
 }
 
 #[test]
-fn an_update_is_a_full_replacement_and_says_so() {
+fn an_update_requires_complete_intended_state_and_says_so() {
     let mock = Mock::start(|_| Reply::json(200, &json!({ "id": "w1" })));
     let cli = Cli::against(&mock);
     let partial = cli.run_with_stdin(
@@ -546,10 +546,48 @@ fn an_update_is_a_full_replacement_and_says_so() {
     assert!(
         partial
             .stdout
-            .contains("Workout is missing required field(s): description.")
+            .contains("Workout is missing required field(s): description, is_private.")
     );
 
     let body = WORKOUT.replace("\"exercises\"", "\"description\":null,\"exercises\"");
+    let missing_privacy = cli.run_with_stdin(
+        &[
+            "workout",
+            "update",
+            "w1",
+            "--file",
+            "-",
+            "--dry-run",
+            "--json",
+        ],
+        &body,
+    );
+    assert_eq!(missing_privacy.code, 2);
+    assert!(missing_privacy.stdout.contains("is_private"));
+
+    for invalid in ["null", "\"false\"", "0"] {
+        let malformed = body.replace(
+            "\"exercises\"",
+            &format!("\"is_private\":{invalid},\"exercises\""),
+        );
+        let result = cli.run_with_stdin(
+            &[
+                "workout",
+                "update",
+                "w1",
+                "--file",
+                "-",
+                "--confirm",
+                "--json",
+            ],
+            &malformed,
+        );
+        assert_eq!(result.code, 2, "{invalid}: {}", result.stdout);
+        assert!(result.stdout.contains("is_private must be a boolean"));
+    }
+    assert!(mock.requests().is_empty());
+
+    let body = body.replace("\"exercises\"", "\"is_private\":false,\"exercises\"");
     let preview = cli
         .run_with_stdin(
             &[
