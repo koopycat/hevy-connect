@@ -2473,6 +2473,11 @@
               ],
               "description": "The user's preferred distance unit. Defaults to kilometers if unset.",
               "example": "kilometers"
+            },
+            "is_pro": {
+              "type": "boolean",
+              "description": "Whether the user has an active Hevy Pro subscription.",
+              "example": true
             }
           }
         },
